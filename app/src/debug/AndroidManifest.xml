@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  debug 专用 manifest：只做"覆盖"，不重复声明组件。
+
+  为什么要在这里再写一次 usesCleartextTraffic：
+    build.gradle.kts 已经用 manifestPlaceholders 按构建类型注入，
+    但 debug 构建如果被 IDE 以"自定义 variant"方式产出，placeholder 有可能
+    落到 release 的默认值上。debug 源集里显式写死 true 是最后一道保险 ——
+    这一份文件**不会**参与 release 构建，因此不可能影响正式包。
+
+  另外给 WebView 打开调试：真机上用 chrome://inspect 能看到页面 console，
+  这是排查"登录成功但页面空白"最有效的手段。release 不开（会暴露内部状态）。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application
+        android:usesCleartextTraffic="true"
+        tools:replace="android:usesCleartextTraffic" />
+
+</manifest>

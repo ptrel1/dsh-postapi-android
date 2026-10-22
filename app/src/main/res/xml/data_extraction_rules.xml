@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  备份 / 设备间迁移的数据提取规则（Android 12 / API 31+ 生效）。
+
+  ==================== 为什么要有这个文件 ====================
+  android:allowBackup="false" 在 API 31+ 上**仍然有效**，但系统还额外引入了
+  D2D（设备到设备迁移）与 cloud-backup 两套独立配置。为了不给任何一条路径
+  留下"意外把加密库带走"的机会，这里**显式**把所有内容排除两遍：
+
+    - cloud-backup：云备份（Google 账号 / 厂商云）；
+    - device-transfer：换机迁移（D2D）。
+
+  被排除的重点是 shared_prefs/dsh_account_secure.xml（账号密码与 cookie 的密文）
+  与 shared_prefs/dsh_login_prefs.xml（上次用的服务器地址），以及
+  CookieManager 在 files/ 下落的 cookie 库。
+
+  ⚠️ 为什么"排除"比"包含白名单"更好：
+     白名单（include 全列）要求每次新增文件都记得回来补一行 —— 忘了就会静默丢数据；
+     这里选择整目录 exclude，新加的东西默认**不**被备份，安全默认值正确。
+
+  ⚠️ 加密数据为什么天生不能跨设备恢复：
+     EncryptedSharedPreferences 的主密钥在 Android Keystore 里、标记为不可导出。
+     换设备/恢复了但密钥不在 ⇒ Tink 解密抛 AEADBadTagException。
+     App 能安全降级（AccountStore 会清空并当没账号），但用户看到的是
+     "怎么又要重新登录" —— 不如一开始就不让密文离开这台设备。
+
+  最低 API：data_extraction_rules 需要 API 31；API 30 及以下由 allowBackup="false" 兜住，
+  fullBackupContent="false" 是 API 23~30 的显式关闭开关。
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- 账号密码 / cookie 密文 -->
+        <exclude domain="sharedpref" path="dsh_account_secure.xml" />
+        <!-- 上次使用的服务器地址 -->
+        <exclude domain="sharedpref" path="dsh_login_prefs.xml" />
+        <!-- 「检查更新」跳过的版本号：本身不机密，但没必要跨设备同步 -->
+        <exclude domain="sharedpref" path="dsh_update_prefs.xml" />
+        <!-- WebView / 系统 CookieManager 的 cookie 库 -->
+        <exclude domain="file" path="app_webview" />
+        <exclude domain="database" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="dsh_account_secure.xml" />
+        <exclude domain="sharedpref" path="dsh_login_prefs.xml" />
+        <exclude domain="sharedpref" path="dsh_update_prefs.xml" />
+        <exclude domain="file" path="app_webview" />
+        <exclude domain="database" path="." />
+    </device-transfer>
+</data-extraction-rules>

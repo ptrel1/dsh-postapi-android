@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <!--
+      主题走 Material3 DayNight：登录页与 WebView 容器只需要
+      "跟随系统明暗 + 一个中性强调色"。不用 DynamicColors 动态取色，
+      MVP 没有品牌一致性之外的需求。
+
+      ⚠️ targetSdk 35 起 statusBarColor / navigationBarColor 在 Android 15+ 上
+      **不再生效**（系统强制 edge-to-edge，这两个区域由应用自己绘制）。
+      真正的"状态栏区域显示什么颜色"由 WindowInsetsHelper 的 padding 方案决定：
+      根容器背景铺到状态栏下方 ⇒ 看到的就是 @color/surface。
+      下面这两个 item 保留是为了 API 24~34 的观感一致，不是为了 API 35。
+    -->
+    <style name="Theme.DshPostapi" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/brand_primary</item>
+        <item name="colorOnPrimary">@color/surface</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar" tools:targetApi="m">true</item>
+        <item name="android:windowBackground">@color/surface</item>
+    </style>
+
+    <!--
+      WebView 容器主题：无 ActionBar。
+      navigationBarColor 从 transparent 改为 @color/surface：
+      底部导航栏区域应当是 App 主题色，而不是透出网页内容。
+      （API 35+ 该项被忽略，由 padding 方案接管；这里保证 API 24~34 一致。）
+    -->
+    <style name="Theme.DshPostapi.Web" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/surface</item>
+        <item name="android:statusBarColor">@color/surface</item>
+        <item name="android:navigationBarColor">@color/surface</item>
+        <item name="android:windowLightStatusBar" tools:targetApi="m">true</item>
+    </style>
+
+</resources>

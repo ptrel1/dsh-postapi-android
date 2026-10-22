@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  WebView 容器布局。
+
+  结构是「一个占满的 WebView + 两层覆盖」：
+    - webView：加载成功后占满，是唯一常态可见的元素；
+    - loadingView：只在首次导航期间覆盖，页面开始渲染即隐藏；
+    - errorView：加载失败时的替代界面（重试 / 返回登录）；
+    - logoutButton：常驻右上角的「退出登录」小按钮（v0.3.0）。
+      为什么用悬浮小圆点而不是右上角菜单：见 WebViewActivity.confirmLogout 的注释。
+  为什么不"切换整棵子树可见性"来换页：
+    切子树会销毁并重建 WebView，等于丢掉页面内所有状态（会话、滚动位置、进行中的请求）。
+    因此失败时 WebView 原地不动，只让 errorView 盖上去；点重试就是 reload 它。
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/rootFrame"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="?android:attr/colorBackground">
+
+    <WebView
+        android:id="@+id/webView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <LinearLayout
+        android:id="@+id/loadingView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="?android:attr/colorBackground"
+        android:gravity="center"
+        android:orientation="vertical">
+
+        <com.google.android.material.progressindicator.CircularProgressIndicator
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:indeterminate="true" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/webview_loading"
+            android:textColor="@color/label_secondary"
+            android:textSize="13sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/errorView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="?android:attr/colorBackground"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:paddingHorizontal="32dp"
+        android:visibility="gone"
+        tools:visibility="gone">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/webview_error_title"
+            android:textAppearance="?attr/textAppearanceTitleMedium"
+            android:textColor="?android:attr/textColorPrimary" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:gravity="center"
+            android:text="@string/webview_error_message"
+            android:textColor="@color/label_secondary"
+            android:textSize="13sp" />
+
+        <!-- 技术信息：把真实错误码/描述原样显示出来。
+             为什么不做"友好化"改写：错误码是排查的唯一线索
+             （401 与 404 的处理方式完全不同），改写会让用户和我们都失去定位能力。 -->
+        <TextView
+            android:id="@+id/errorDetail"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:fontFamily="monospace"
+            android:gravity="center"
+            android:maxLines="4"
+            android:textColor="@color/label_secondary"
+            android:textSize="11sp"
+            tools:text="net::ERR_CONNECTION_REFUSED" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/retryButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:minWidth="140dp"
+            android:text="@string/action_retry" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/reloginButton"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/action_back_to_login" />
+
+        <!--
+          「退出登录」（v0.3.0）：错误页上也要有 —— 会话 401/403 时用户最想做的事
+          就是换个账号。故意用次要样式（TextButton）+ 确认弹窗，
+          因为它会**清空存储的密码**，误点代价高。
+        -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/logoutButton"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="@string/logout_title"
+            android:textColor="@color/error_text" />
+
+    </LinearLayout>
+
+    <!--
+      常驻「退出登录」入口（v0.3.0）。
+
+      位置：右下角、覆盖在 WebView 之上。为什么不是右上角：
+        官方前端自己在顶部有标题栏/按钮，右上角有较高的概率与之重叠，
+        叠在一起时 WebView 会吞掉点击事件，用户会觉得"按钮点了没反应"。
+        右下角是官方前端通常不会有常驻按钮的区域，且在大屏单手操作下更好按。
+
+      视觉：半透明 + 小尺寸（36dp），不抢网页内容的视觉重心；
+        点击后弹确认对话框（见 WebViewActivity.performLogout）。
+        clickable/focusable=true 是必须的 —— FrameLayout 里后声明的子 View
+        会接收事件，但若不可点击，事件会穿透到下面的 WebView（造成"点到了却没反应"）。
+    -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/logoutFab"
+        style="@style/Widget.Material3.Button.IconButton"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="12dp"
+        android:alpha="0.75"
+        android:contentDescription="@string/logout_title"
+        android:text="@string/logout_short"
+        android:textSize="11sp" />
+
+</FrameLayout>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  minSdk 24/25 没有 adaptive-icon（API 26 才引入）。
+  这里不再用 vector 画假图标，而是引用 mipmap-*dpi/ic_launcher.png ——
+  那是「白圆底 + 黑鲸鱼」合成好的传统图标，视觉效果与 adaptive 一致。
+-->
+<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
+    android:src="@mipmap/ic_launcher_legacy" />

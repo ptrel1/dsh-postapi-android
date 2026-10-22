@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Adaptive icon（API 26+）。
+  前景/背景都用 PNG（mipmap-*dpi/ic_launcher_foreground.png / _background.png），
+  由 DSH 官方鲸鱼图标（apps/web/public/favicon.svg，fill=#000）渲染生成：
+    - 背景：纯白
+    - 前景：黑色鲸鱼，占画布 62%（落在 adaptive icon 安全区内，避免被圆形/方形裁切）
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@mipmap/ic_launcher_background" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+</adaptive-icon>

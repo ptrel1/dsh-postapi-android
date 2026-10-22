@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 深色模式：只反转"面"和"次级文字"，语义色单独调亮以保证在深底上可读。
+         不要整体复制浅色文件再改值——那会让两边字段逐渐漂移。 -->
+    <color name="brand_primary">#F2F4F7</color>
+    <color name="brand_primary_dark">#101418</color>
+    <color name="surface">#15181C</color>
+    <color name="surface_dark">#0E1013</color>
+    <color name="label_secondary">#9AA3AF</color>
+    <color name="label_secondary_dark">#7A8496</color>
+
+    <!-- 深底上的描边要用浅色叠加，用黑色叠加会"看不见" -->
+    <color name="card_stroke">#1FFFFFFF</color>
+
+    <!-- 深底上的错误色必须调亮：同一个 #C0392B 在深底上对比度不足 -->
+    <color name="error_text">#F87171</color>
+</resources>

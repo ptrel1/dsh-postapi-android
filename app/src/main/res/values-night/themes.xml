@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!--
+      深色模式下的状态栏图标必须是浅色，否则"浅色图标画在浅底上"看不见。
+      这正是「背景与前景是一对」的典型：改背景必须同时改前景色，
+      只改一半就会出现白底白字。
+
+      注意：真正的图标明暗在运行时由 WindowInsetsHelper.applySystemBarIconAppearance()
+      按 uiMode 设定（因为用户可能不重启就切换深色模式）；这里的 item 只保证
+      冷启动的第一帧不会闪成错误颜色。
+    -->
+    <style name="Theme.DshPostapi" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/brand_primary</item>
+        <item name="colorOnPrimary">@color/surface</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar" tools:targetApi="m">false</item>
+        <item name="android:windowBackground">@color/surface</item>
+    </style>
+
+    <style name="Theme.DshPostapi.Web" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/surface</item>
+        <item name="android:statusBarColor">@color/surface</item>
+        <item name="android:navigationBarColor">@color/surface</item>
+        <item name="android:windowLightStatusBar" tools:targetApi="m">false</item>
+    </style>
+</resources>

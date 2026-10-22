@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      只定义主题骨架需要的角色色。
+      登录页整体走系统浅/深色（见 values-night），这里不要塞业务色，
+      否则暗色模式下必然出现"白底白字"。
+    -->
+    <color name="brand_primary">#101418</color>
+    <color name="brand_primary_dark">#F2F4F7</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="surface_dark">#15181C</color>
+    <color name="label_secondary">#6B7280</color>
+    <color name="label_secondary_dark">#9AA3AF</color>
+
+    <!-- 层级描边：比背景深一点点即可，过深会回到"传统企业软件"的观感 -->
+    <color name="card_stroke">#1F000000</color>
+
+    <!-- 错误态语义色：不参与明暗主题的"降饱和"调整（安全信息必须始终醒目） -->
+    <color name="error_text">#C0392B</color>
+</resources>

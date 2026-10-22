@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  登录页布局。
+
+  设计要点（按「信息价值分配空间」）：
+    - 单个居中卡片，宽度随屏幕自适应但有上限（见 bg_card + 外层 padding），
+      避免平板上一行拉满；
+    - 三个输入框 + 一个主按钮。**没有「记住密码」开关**（用户明确要求不要加）：
+      默认就是记住 —— 一个永远开着的开关比没有开关更让人困惑；
+    - autoLoginHint / retryAutoLoginButton 是 v0.3.0「账号本地记忆」用的：
+      自动重登进行中显示一行进度提示；网络/限流类失败时给一个「重新登录」，
+      让用户不必重新敲一遍密码。
+    - 外层 ScrollView：横屏 + 键盘弹出时可视高度极小，不套滚动容器会把按钮挤到键盘后面。
+-->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/loginScroll"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="?android:attr/colorBackground"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:paddingHorizontal="20dp"
+        android:paddingVertical="32dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_card"
+            android:orientation="vertical"
+            android:paddingHorizontal="20dp"
+            android:paddingVertical="24dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/login_title"
+                android:textAppearance="?attr/textAppearanceHeadlineSmall"
+                android:textColor="?android:attr/textColorPrimary" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="@string/login_subtitle"
+                android:textColor="@color/label_secondary"
+                android:textSize="13sp" />
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/hostLayout"
+                style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:hint="@string/label_host">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/hostInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:autofillHints="url"
+                    android:imeOptions="actionNext"
+                    android:inputType="textUri"
+                    android:maxLines="1"
+                    android:text="@string/default_host" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/usernameLayout"
+                style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:hint="@string/label_username">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/usernameInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:autofillHints="username"
+                    android:imeOptions="actionNext"
+                    android:inputType="text"
+                    android:maxLines="1" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/passwordLayout"
+                style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:hint="@string/label_password"
+                app:endIconMode="password_toggle">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/passwordInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:autofillHints="password"
+                    android:imeOptions="actionDone"
+                    android:inputType="textPassword"
+                    android:maxLines="1" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <!--
+              错误区：用 visibility 控制而非常驻空行。
+              为什么不用 Snackbar / Toast：401/429/503 的文案需要用户对照着改输入，
+              自动消失的提示会在"正在看提示"的那一刻消失。
+            -->
+            <!--
+              自动重登提示（v0.3.0）：只在「有保存的账号，正在自动登录」时出现。
+              为什么不复用 loginProgress：那个是圆形转圈，不带文字；这里需要说清
+              "正在用你上次的账号登录"，否则用户会以为卡住了。
+            -->
+            <TextView
+                android:id="@+id/autoLoginHint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:textColor="@color/label_secondary"
+                android:textSize="13sp"
+                android:visibility="gone"
+                tools:text="正在用上次的账号自动登录…"
+                tools:visibility="gone" />
+
+            <TextView
+                android:id="@+id/errorText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:textColor="@color/error_text"
+                android:textSize="13sp"
+                android:visibility="gone"
+                tools:text="用户名或密码错误"
+                tools:visibility="visible" />
+
+            <!--
+              「重新登录」：只在自动重登因**非凭据原因**失败时出现
+              （网络错误 / 429 限流 / 服务端 5xx）。凭据被服务端否定（401/403）时
+              不出现 —— 那时密码已被清掉，重试必然还是失败。
+            -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/retryAutoLoginButton"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="end"
+                android:visibility="gone"
+                tools:text="用保存的账号重新登录"
+                tools:visibility="gone" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/loginButton"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginTop="20dp"
+                android:text="@string/action_login"
+                android:textSize="16sp" />
+
+            <com.google.android.material.progressindicator.CircularProgressIndicator
+                android:id="@+id/loginProgress"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginTop="12dp"
+                android:indeterminate="true"
+                android:visibility="gone" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+</ScrollView>

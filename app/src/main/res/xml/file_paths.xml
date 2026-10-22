@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FileProvider 暴露给系统安装器的目录白名单。
+
+  ⚠️ 三处必须一致，改一处就要同步改另两处：
+    1. 这里声明的路径   → 必须在 APK 实际落点的父目录范围内
+    2. AndroidManifest 的 <provider android:authorities>
+       = ${applicationId}.fileprovider
+    3. ApkInstaller.fileProviderAuthority() 拼出来的字符串
+
+  ⚠️ 只暴露 **cacheDir/updates 这一个子目录**，不要图省事写 <cache-path path="." />
+  或 <root-path>：那等于把整个缓存目录/整个存储暴露给任意能拉起本 App provider 的应用，
+  是 Android 上最常见的"便利即漏洞"写法。
+
+  Android 11+ 虽要求 provider 的 exported=false + 显式 grantUriPermission（我们用
+  FLAG_GRANT_READ_URI_PERMISSION），但白名单范围仍是第二道防线，保持最小。
+
+  metadata 的 android:support.version 对多数 ROM 无实际影响，省略即可；
+  grantedUriPermissions 的授权由 Intent flag 运行时完成，不需要在 XML 里写 <grant-uri-permission>。
+-->
+<paths>
+    <!-- 与 UpdateClient.apkTarget() 的 File(context.cacheDir, "updates") 对应 -->
+    <cache-path
+        name="updates"
+        path="updates/" />
+</paths>

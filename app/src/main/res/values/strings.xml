@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DSH PostAPI</string>
+
+    <!-- ===== 登录页 ===== -->
+    <string name="login_title">登录 DSH</string>
+    <string name="login_subtitle">账号密码只在本机加密保存，用于下次打开时免去重新输入。点「退出登录」可随时清除。</string>
+    <string name="label_host">服务地址</string>
+    <string name="label_username">用户名</string>
+    <string name="label_password">密码</string>
+    <string name="action_login">登录</string>
+    <string name="action_login_in_progress">正在登录…</string>
+
+    <!--
+      默认地址只是"预填"，**不是**某个真实服务：v0.3.0 起仓库里不留任何真实域名。
+      首次使用的用户必须把它改成自己的 DSH 地址（README 已写明）。
+
+      为什么是 127.0.0.1:3080 而不是空字符串：
+        · 空输入框会让人以为不知道填什么，且点了登录才报错；
+        · 127.0.0.1 是"本机"的通用写法，配合端口就是 DSH web 的默认监听端口，
+          对"自己在电脑上跑了 dsh web、手机用 USB 端口转发"的调试场景直接可用；
+        · 它不会被误认成某个公网服务（这是清除真实域名的目的）。
+
+      translatable=false 的理由：这是一个技术性默认值，不该出现在翻译清单里；
+      不同语言的用户改的是同一台服务器的地址。
+    -->
+    <string name="default_host" translatable="false">http://127.0.0.1:3080</string>
+
+    <!-- ===== 登录校验与错误文案 =====
+         每一条都对应一个可行动的方向：改输入 / 等待 / 找管理员 / 查域名配置。
+         不要把它们合并成"登录失败"—— 那样用户无从判断下一步做什么。 -->
+    <string name="error_host_invalid">服务地址格式不正确，应形如 https://dsh.example.com（可带端口，可省略 https://）</string>
+    <string name="error_username_empty">请填写用户名</string>
+    <string name="error_password_empty">请填写密码</string>
+    <string name="error_network">无法连接服务器，请检查网络或地址是否正确</string>
+    <string name="error_timeout">连接超时，请稍后重试</string>
+    <string name="error_401">用户名或密码错误</string>
+    <string name="error_429">尝试次数过多，请 10 分钟后再试</string>
+    <string name="error_503">服务端暂时不可用（读不到启动令牌），请联系管理员检查 dsh web 日志</string>
+    <string name="error_404">该地址上没有登录接口，请确认域名与反向代理配置</string>
+    <string name="error_bad_response">服务器返回了无法解析的响应</string>
+    <string name="error_server">服务器错误（HTTP %1$d）</string>
+
+    <!-- ===== WebView 容器 ===== -->
+    <string name="webview_loading">正在加载…</string>
+    <string name="webview_error_title">页面加载失败</string>
+    <string name="webview_error_message">可能是网络中断、服务器未启动，或登录状态已失效。</string>
+    <string name="action_retry">重试</string>
+    <string name="action_back_to_login">返回登录</string>
+    <!--
+      与上面那条不同：会话 cookie 被服务端吊销后，"返回登录"其实需要用户重新输入密码
+      （本版不会自动重登，见 WebViewActivity.showError 的取舍说明），
+      文案必须把这件事说在前面，否则用户会以为点了就自动好了。
+    -->
+    <string name="action_back_to_login_needs_password">返回登录（需重新输入密码）</string>
+    <string name="webview_exit_hint">再按一次返回键退出</string>
+
+    <!-- ===== 检查更新 =====
+         文案原则：每条都指向一个可行动的下一步；技术原因以原始描述附在正文下方，
+         不塞进人话里（否则用户读不懂，排查时我们又找不到）。 -->
+    <string name="update_title">发现新版本 %1$s</string>
+    <string name="update_message_no_notes">服务端未提供更新说明。建议更新以获取最新修复。</string>
+    <string name="update_action_later">稍后</string>
+    <string name="update_action_update">立即更新</string>
+    <string name="update_action_cancel">取消</string>
+    <string name="update_action_retry">重试</string>
+    <string name="update_action_close">关闭</string>
+    <string name="update_download_starting">正在准备下载…</string>
+    <!-- 已下载 / 总大小 / 百分比：三个信息一起给，用户才能判断是在动还是卡住了 -->
+    <string name="update_download_progress">%1$s / %2$s（%3$d%%）</string>
+    <string name="update_download_progress_unknown">已下载 %1$s…</string>
+    <string name="update_need_relogin">会话已失效，请返回登录页重新登录后再更新</string>
+    <string name="update_permission_title">需要允许安装应用</string>
+    <string name="update_permission_message">Android 要求先在本应用上打开「安装未知应用」开关，系统才能安装下载好的安装包。
+
+下一步：点「去设置」→ 找到「允许来自此来源的应用」→ 打开 → 返回 App 重新点「立即更新」。</string>
+    <string name="update_permission_action">去设置</string>
+    <string name="update_install_failed">无法拉起安装器：%1$s</string>
+    <string name="update_error_title">下载失败</string>
+    <string name="update_error_no_space">存储空间不足：需要约 %1$s，当前可用 %2$s。请清理后再重试。</string>
+    <string name="update_error_checksum">安装包校验失败（sha256 不一致），文件已删除。可能是下载被中断或服务端文件已更新，请重试。</string>
+    <string name="update_error_timeout">下载超时，网络可能不稳定。请重试。</string>
+    <string name="update_error_http">服务器拒绝下载（HTTP %1$d），可能登录已过期。可返回登录页重新登录后再试。</string>
+    <string name="update_error_not_ready">服务端还没有放好安装包，请稍后再试。</string>
+    <string name="update_error_generic">下载未完成，请重试。</string>
+
+    <!-- ===== 账号本地记忆 / 自动重登（v0.3.0）=====
+         文案原则同上面几条：每一条都要说清"发生了什么"和"你现在能做什么"，
+         不能只说"登录失败"——自动重登与用户手动点登录，用户的心理预期不同。 -->
+    <string name="auto_login_in_progress">正在用上次的账号自动登录…</string>
+    <!-- 401 / 403：唯一会清除密码的两种情形，必须明说"密码已清除"，否则用户会奇怪下次为什么又要输 -->
+    <string name="auto_login_credentials_rejected">保存的账号密码已失效（可能改过密码或账号被停用）。已清除本机保存的密码，请重新输入。</string>
+    <string name="auto_login_network">暂时无法连接服务器，还没有用保存的账号登录。网络恢复后可重试，保存的账号仍在。</string>
+    <string name="auto_login_rate_limited">尝试次数过多，服务端暂时限制登录（约 10 分钟）。保存的账号仍然保留，稍后再试即可。</string>
+    <string name="auto_login_server_error">服务器暂时无法完成登录，保存的账号仍然保留，稍后可重试。</string>
+    <string name="auto_login_host_invalid">保存的服务地址无法解析，请重新填写服务地址。</string>
+    <string name="auto_login_retry_unavailable">已没有可自动登录的账号，请手动输入密码。</string>
+
+    <!-- ===== 退出登录（v0.3.0）=====
+         「退出登录」与「返回登录」是两件事，文案必须区分：
+         前者清除本机记录，后者只是重新登一次同一个账号。 -->
+    <string name="logout_title">退出登录</string>
+    <string name="logout_short">退出</string>
+    <string name="logout_message">将清除本机保存的账号、密码与登录状态，下次打开需要重新输入。确定退出？</string>
+    <string name="logout_action_confirm">退出登录</string>
+    <string name="logout_action_cancel">取消</string>
+    <string name="logout_done">已退出登录</string>
+</resources>

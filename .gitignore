@@ -1,0 +1,36 @@
+# ===== Android 构建产物 =====
+build/
+app/build/
+
+# ===== Gradle =====
+.gradle/
+# ⚠️ gradle/wrapper/gradle-wrapper.jar 是**需要提交**的：
+# 它是 wrapper 的引导程序，不提交的话 clone 下来无法执行 ./gradlew（要手工装 Gradle）。
+# 唯一例外在这里显式否定，避免被下面的 *.jar 规则误伤。
+!gradle/wrapper/gradle-wrapper.jar
+
+# ===== 本机配置（含 SDK 路径、签名密码，绝不提交）=====
+local.properties
+*.jks
+*.keystore
+
+# ===== APK / 产物 =====
+*.apk
+*.aab
+# 仓库根目录历次手工拷贝的安装包（历史遗留，不该进版本库）
+DSH-PostAPI-v*-debug.apk
+
+# ===== IDE =====
+*.iml
+.idea/
+.vscode/
+
+# ===== 系统 / 原生构建 =====
+captures/
+.externalNativeBuild/
+.cxx/
+*.hprof
+.DS_Store
+
+# ===== 日志 =====
+*.log

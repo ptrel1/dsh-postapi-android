@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 必需权限：与 DSH 服务通信（mobile-login 与 /api/* 都需要） -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!--
+      「检查更新」用：拉起系统安装器安装下载好的 APK。
+      Android 8 (API 26) 起这是**按应用授权**的开关（设置 → 应用 → 本应用 → 安装未知应用），
+      声明了它才有资格出现在那个开关里；实际是否已授权要运行时查
+      PackageManager.canRequestPackageInstalls()（见 ApkInstaller）。
+
+      注意它**不等于**能静默安装：拉起安装器后仍然由用户确认。
+      不申请 REQUEST_DELETE_PACKAGES 等无关权限，保持最小面。
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <!--
+      usesCleartextTraffic 由 build.gradle.kts 的 manifestPlaceholders 按构建类型注入：
+        debug   → true （真机联调常用 http://192.168.x.x:端口号 直连）
+        release → false（公网入口必须是 https；明文 HTTP 一律禁止）
+      不要在这里写死 true —— 那会让 release 包也放行明文流量。
+    -->
+    <!--
+      android:allowBackup="false"（v0.3.0 起是本工程的**硬要求**，不要打开）
+        账号密码与 cookie 存在 EncryptedSharedPreferences 里，而加密密钥**只在
+        本机的 Android Keystore 里、不可导出**。
+        云备份会把密文文件带走，恢复到一个 Keystore 不同（或根本没有那把密钥）的新设备上，
+        结果只能是"解密失败"。
+        v0.3.0 已经能让解密失败时安全降级（清空 + 当没账号，见 AccountStore），
+        但**从源头不让密文离开本机**才是正确做法 —— 降级逻辑是兜底，不是设计目标。
+
+      android:name=".DshApp"
+        只用于在后台线程预热加密存储（首次生成 Keystore 密钥要 200~500ms）。
+        漏写不会报错，只是启动时多白屏半秒 —— 属于静默失效，改 manifest 时注意别删。
+    -->
+    <application
+        android:name=".DshApp"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.DshPostapi"
+        android:usesCleartextTraffic="${usesCleartextTraffic}">
+
+        <!--
+          登录页是唯一入口。WebViewActivity 不导出（exported=false）：
+          它需要一个 launchUrl 参数且依赖登录页种好的 cookie，
+          被外部应用直接拉起只会得到一个白屏，没有放开的理由。
+        -->
+        <activity
+            android:name=".LoginActivity"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".WebViewActivity"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!--
+          FileProvider：「检查更新」下载完 APK 后，把它以 content:// 交给系统安装器。
+
+          为什么必须有：Android 7 (API 24) 起向其它应用传 file:// 会抛
+          FileUriExposedException（我们的 minSdk 正是 24）。
+
+          ⚠️ 三处一致性要求（改一处必须同步）：
+            · authorities = ${applicationId}.fileprovider  ←→ ApkInstaller.fileProviderAuthority()
+            · meta-data 的 @xml/file_paths                ←→ res/xml/file_paths.xml 里暴露的目录
+            · 暴露目录 = <cacheDir>/updates/              ←→ UpdateClient.apkTarget()
+
+          exported=false + grantUriPermissions=true：
+            只有拿到我们显式授权的应用（安装器，靠 FLAG_GRANT_READ_URI_PERMISSION）
+            才能读这个 URI，其它应用即使猜到路径也读不到。
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+
+</manifest>

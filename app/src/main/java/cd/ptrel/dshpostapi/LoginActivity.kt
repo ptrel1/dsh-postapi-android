@@ -1,0 +1,587 @@
+package cd.ptrel.dshpostapi
+
+import android.content.Intent
+import android.os.Bundle
+import android.text.Editable
+import android.text.TextWatcher
+import android.util.Log
+import android.view.View
+import android.view.inputmethod.EditorInfo
+import androidx.appcompat.app.AppCompatActivity
+import cd.ptrel.dshpostapi.databinding.ActivityLoginBinding
+
+/**
+ * 原生登录页：账号密码 -> POST /api/dsh/v1/mobile-login -> 把结果交给 WebViewActivity。
+ *
+ * 为什么登录页是原生的、而不是直接用官方 /login 网页：
+ *   官方登录页是"提交表单 + 302 跳转"，WebView 里做完之后仍然缺官方签名 cookie
+ *   的铸造入口（那个入口只有 GET /?token= 一个）。mobile-login 正是为此加的
+ *   机器可编程入口：一次调用同时拿到 launchUrl（可铸官方 cookie）与插件会话 cookie。
+ *
+ * ==================== v0.3.0：账号本地记忆 ====================
+ * 本页现在是**两个入口**：
+ *   ① 冷启动：先问 [LoginFlow.decideOnStart]，可能直接跳过本页进 WebView；
+ *   ② 从 WebView「返回登录/退出登录」回来：预填上次的 host + username，密码留空。
+ *
+ * 决策逻辑全在 [LoginFlow]（那里有完整的边界表），本页只负责**呈现**。
+ *
+ * 凭据处理（安全边界，改代码前先读）：
+ *   - 密码在本页只存在于两个地方：输入框（用户输入）与 [AutoLogin] 的局部变量；
+ *   - **不写日志**（本文件所有 Log 都只记异常类名/状态，绝不记输入值）；
+ *   - **不进 Intent extras**：跳 WebViewActivity 只传 launchUrl 与 cookie ——
+ *     等等，cookie 也进 Intent 了（见 openWebView）。这是 v0.2.0 的既有设计，
+ *     v0.3.0 保留：Intent 只在同一 App 的进程内传递（WebViewActivity 未导出，
+ *     exported=false），且不入最近任务快照。密码则**完全不出本页**。
+ *   - 登录成功后清空输入框里的密码（onResume 也会清，双保险）。
+ */
+class LoginActivity : AppCompatActivity() {
+
+    private companion object {
+        const val TAG = "LoginActivity"
+    }
+
+    private lateinit var binding: ActivityLoginBinding
+
+    /** 是否已按 [LoginFlow.Decision] 完成过预填。避免 onResume 反复覆盖用户正在输入的内容。 */
+    private var prefillDone = false
+
+    /**
+     * 自动重登用到的凭据。
+     *
+     * 为什么不用字段存密码：见 onDestroy —— 本页退出时把它置空，
+     * 减少"密码在内存里长驻"的窗口。存的是 LoginFlow 从加密库读出来的那一份。
+     */
+    private var pendingAutoLoginHost: ApiClient.HostSpec? = null
+    private var pendingAutoLoginUsername: String = ""
+    private var pendingAutoLoginPassword: String = ""
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        binding = ActivityLoginBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        // ===== 系统栏留白（targetSdk 35 强制 edge-to-edge 的必要处理）=====
+        WindowInsetsHelper.applySystemBarPadding(binding.loginScroll)
+        WindowInsetsHelper.applySystemBarIconAppearance(this, isLightBackground())
+
+        binding.loginButton.setOnClickListener { submit() }
+        binding.passwordInput.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_DONE) {
+                submit()
+                true
+            } else {
+                false
+            }
+        }
+        // 「重新登录」：自动重登失败后的重试入口（网络 / 429 场景）。
+        binding.retryAutoLoginButton.setOnClickListener { retryAutoLogin() }
+
+        // 地址被用户改动 ⇒ 视为换服务器，清掉旧账号的密码与 cookie。
+        // 只监听 hostInput，且只在"已有账号且新地址与旧地址不同"时动手（见 onHostEdited）。
+        binding.hostInput.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: Editable?) {
+                if (suppressHostWatcher) return
+                onHostEdited(s?.toString().orEmpty())
+            }
+        })
+
+        // ===== 冷启动决策（只做一次）=====
+        // 为什么用 LoginFlow 的进程级标志而不是 savedInstanceState：
+        //   本 Activity 被「退出登录」重新拉起（startActivity(new Intent(this, LoginActivity))）
+        //   时，savedInstanceState 是 null —— 那会被误判成"冷启动"，
+        //   于是刚退出登录就立刻自动重登回去，用户会觉得"退不出去"。
+        //   进程级标志在两种情况下的语义都对：
+        //     · 冷启动：第一次进 → 做决策（含自动重登）；
+        //     · 退出登录后重进：同一进程，标志已是 true → 只预填，不自动重登。
+        //   两个 Activity 实例并存（栈里保留旧实例）时也共享这个标志，不会打架。
+        if (!LoginFlow.isStartDecisionDone()) {
+            startDecision()
+        } else {
+            prefillFromStore()
+        }
+    }
+
+    // ==========================================================================
+    // 启动决策
+    // ==========================================================================
+
+    private fun startDecision() {
+        // ⚠️ 先把"启动决策已开始"这个标志置上，**在**异步读取之前。
+        // 理由：decideOnStart 是异步的（IO 线程读存储）。如果标志在回调里才置，
+        // 用户在 200~500ms 的窗口内转屏 → 新实例 onCreate 又跑一遍 → 两次决策、
+        // 两次自动重登（服务端会按 IP 计两次失败）。开始前置上就堵住了这个窗口。
+        LoginFlow.markStartDecisionDone()
+        // LoginFlow 内部切线程（存储读取要几百毫秒）。
+        LoginFlow.decideOnStart(this) { decision ->
+            if (isFinishing || isDestroyed) return@decideOnStart
+            when (decision) {
+                is LoginFlow.Decision.EnterWebView -> {
+                    // cookie 仍有效：跳过登录页，直接进 WebView。
+                    enterWebViewWithoutLogin(decision.launchUrl)
+                }
+                is LoginFlow.Decision.ShowLoginPage -> {
+                    applyPrefill(decision.host, decision.username)
+                    if (decision.password.isNotEmpty()) {
+                        // 有密码 ⇒ 发起自动重登（用户看不到登录页，除非失败）。
+                        pendingAutoLoginUsername = decision.username
+                        pendingAutoLoginPassword = decision.password
+                        pendingAutoLoginHost = ApiClient.parseHost(decision.host)
+                        if (pendingAutoLoginHost != null) {
+                            performAutoLogin()
+                        } else {
+                            // host 坏到连解析都失败：当作没账号，停在登录页让用户改。
+                            clearPendingCredentials()
+                        }
+                    }
+                }
+                is LoginFlow.Decision.AutoLoginFailed -> Unit // decideOnStart 不会返回它
+            }
+        }
+    }
+
+    /**
+     * 非冷启动（例如「退出登录」后重新进入本页）：只预填，不做任何网络请求。
+     *
+     * 读的是存储里的 host / username；退出登录会清空它们，此时回退到
+     * [LoginDefaults] 里"上次用过的地址"（那个库刻意不被退出登录清除）。
+     */
+    private fun prefillFromStore() {
+        val account = LoginFlow.peek(this)
+        if (account != null) {
+            applyPrefill(account.host, account.username)
+        } else {
+            val last = LoginDefaults.lastHost(this)
+            if (last != null) applyPrefill(last, "")
+        }
+    }
+
+    /** 用上次的 host / username 预填；密码永远留空（除非走自动重登）。 */
+    private fun applyPrefill(host: String, username: String) {
+        if (prefillDone) return
+        prefillDone = true
+        // 直接 setText 会触发 hostInput 的 TextWatcher → 被误判成"用户改了服务器"。
+        // 用 suppressHostWatcher 抑制这一次。
+        suppressHostWatcher = true
+        try {
+            binding.hostInput.setText(host)
+            binding.usernameInput.setText(username)
+            binding.passwordInput.setText("")
+        } finally {
+            suppressHostWatcher = false
+        }
+    }
+
+    /**
+     * 「cookie 仍有效」路径：不经过登录，直接进 WebView。
+     *
+     * 此时没有新的 launchUrl（一次性 token 早已消费），所以：
+     *   - 加载地址 = host 根路径；
+     *   - **不需要种 cookie**：官方签名 cookie 与插件 cookie 都在 CookieManager 里
+     *     （WebView 自己的 cookie 库跨进程持久化），导航时自动带上。
+     *
+     * 若这枚 cookie 其实已被服务端吊销，WebView 会显示 401 错误页 —— 那里有
+     * 「重新登录」入口，会回到本页并强制走自动重登（见 WebViewActivity）。
+     */
+    private fun enterWebViewWithoutLogin(url: String) {
+        // 检查更新需要 cookie：此时 cookie 在 CookieManager 里而不是登录响应的
+        // 内存上下文里，UpdateSession 从 AccountStore 读（那里存着登录时那份），
+        // 所以这里不需要额外做什么。若存储里没有 cookie（例如上一版残留），
+        // Updates.checkQuietly 会静默返回，不会误报。
+        val intent = Intent(this, WebViewActivity::class.java).apply {
+            putExtra(WebViewActivity.EXTRA_LAUNCH_URL, url)
+            // cookie 三件套留空 ⇒ WebViewActivity 走"复用 CookieManager 已有 cookie"分支。
+            putExtra(WebViewActivity.EXTRA_RESUME_MODE, true)
+        }
+        startActivity(intent)
+        finish()
+    }
+
+    // ==========================================================================
+    // 自动重登
+    // ==========================================================================
+
+    private fun performAutoLogin() {
+        val host = pendingAutoLoginHost ?: return
+        if (pendingAutoLoginPassword.isEmpty()) return
+
+        setBusy(true)
+        binding.autoLoginHint.visibility = View.VISIBLE
+        binding.autoLoginHint.text = getString(R.string.auto_login_in_progress)
+        binding.retryAutoLoginButton.visibility = View.GONE
+
+        LoginFlow.performAutoLogin(
+            context = this,
+            host = host,
+            username = pendingAutoLoginUsername,
+            password = pendingAutoLoginPassword,
+            onSuccess = { launchUrl ->
+                if (isFinishing || isDestroyed) return@performAutoLogin
+                Log.i(TAG, "auto-login ok")
+                clearPendingCredentials()
+                binding.autoLoginHint.visibility = View.GONE
+                setBusy(false)
+                // 自动重登成功：存 cookie 由 LoginFlow 完成（它拿到的是响应体）。
+                // 这里只负责跳转。
+                openWebViewWithLaunchUrl(launchUrl, host.baseUrl)
+            },
+            onFailure = { message, detail, cleared, retryable ->
+                if (isFinishing || isDestroyed) return@performAutoLogin
+                // ⚠️ 不记录 detail 到日志：detail 可能含响应体片段（服务端 403 的 body）。
+                // 它只展示在错误区，供用户排查。
+                Log.w(TAG, "auto-login failed: cleared=" + cleared + " retryable=" + retryable)
+                setBusy(false)
+                pendingAutoLoginPassword = ""
+                binding.autoLoginHint.visibility = View.GONE
+                showError(message, detail)
+                if (cleared) {
+                    // 凭据已被清除：密码框必须清空，否则用户会以为"密码还在，只是没登上去"。
+                    binding.passwordInput.setText("")
+                    binding.usernameInput.setText(pendingAutoLoginUsername.ifEmpty {
+                        binding.usernameInput.text?.toString().orEmpty()
+                    })
+                }
+                binding.retryAutoLoginButton.visibility = if (retryable) View.VISIBLE else View.GONE
+                if (retryable) {
+                    binding.loginButton.text = getString(R.string.action_login)
+                }
+            },
+        )
+    }
+
+    /** 「重新登录」按钮：只有 retryable 时可见。重新读一次存储里的密码后再试。 */
+    private fun retryAutoLogin() {
+        if (pendingAutoLoginPassword.isNotEmpty()) {
+            // 内存里还有（网络/限流失败路径保留），直接用。
+            binding.errorText.visibility = View.GONE
+            performAutoLogin()
+            return
+        }
+        // 内存里没了（Activity 重建过 / 上次被清）：从加密存储重新取一次。
+        binding.errorText.visibility = View.GONE
+        binding.autoLoginHint.visibility = View.VISIBLE
+        binding.autoLoginHint.text = getString(R.string.auto_login_in_progress)
+        binding.retryAutoLoginButton.visibility = View.GONE
+        setBusy(true)
+        LoginFlow.decideOnStart(this) { decision ->
+            if (isFinishing || isDestroyed) return@decideOnStart
+            setBusy(false)
+            binding.autoLoginHint.visibility = View.GONE
+            if (decision is LoginFlow.Decision.ShowLoginPage && decision.password.isNotEmpty()) {
+                pendingAutoLoginUsername = decision.username
+                pendingAutoLoginPassword = decision.password
+                pendingAutoLoginHost = ApiClient.parseHost(decision.host)
+                performAutoLogin()
+            } else {
+                // 密码已经不在了（上一次失败是 401/403）⇒ 只能手动登录。
+                showError(getString(R.string.auto_login_retry_unavailable))
+                binding.retryAutoLoginButton.visibility = View.GONE
+            }
+        }
+    }
+
+    /**
+     * 自动重登成功后的跳转。
+     *
+     * 与 [openWebView]（手动登录路径）的分工：
+     *   · 手动登录：result 就在手上（含 cookie）→ cookie 走 Intent 交给 WebViewActivity 种；
+     *   · 自动重登：cookie 由 LoginFlow 在 onSuccess 之前**已经种进 CookieManager 并 flush**
+     *     （见 LoginFlow.seedSessionCookie），所以这里用 resume 模式，
+     *     WebViewActivity 不会再种一次（避免 Max-Age 被重置）。
+     *
+     * 这样做的好处：cookie 值不需要再从存储读出来、再穿过 Intent ——
+     * 凭据在进程里流动的路径越短越好。
+     */
+    private fun openWebViewWithLaunchUrl(launchUrl: String, hostBaseUrl: String) {
+        Updates.checkQuietly(this)
+        val intent = Intent(this, WebViewActivity::class.java).apply {
+            putExtra(WebViewActivity.EXTRA_LAUNCH_URL, launchUrl)
+            putExtra(WebViewActivity.EXTRA_HOST, hostBaseUrl)
+            // cookie 已由 LoginFlow 种入 CookieManager，这里用 resume 语义：
+            // WebViewActivity 不会再种一次（避免 Max-Age 被重置成另一个值）。
+            putExtra(WebViewActivity.EXTRA_RESUME_MODE, true)
+        }
+        startActivity(intent)
+        finish()
+    }
+
+    /**
+     * 清掉内存副本。
+     *
+     * 为什么这么在意：密码在 JVM 堆里是不可擦除的（String 不可变、GC 会搬移），
+     * 我们能做的是**尽快丢掉引用**，缩短它可被堆转储/调试器读到的窗口。
+     */
+    private fun clearPendingCredentials() {
+        pendingAutoLoginHost = null
+        pendingAutoLoginUsername = ""
+        pendingAutoLoginPassword = ""
+    }
+
+    // ==========================================================================
+    // 换服务器 ⇒ 清空旧凭据
+    // ==========================================================================
+
+    /**
+     * host 输入框被改动时的处理。
+     *
+     * ===== 为什么必须清凭据 =====
+     * 用户把地址从 A 改成 B，若不清凭据，下一步会是：
+     *   ① 自动重登仍拿「A 的密码」去试「B」——失败，然后按 401 清掉密码；
+     *   ② 更糟：若 B 上恰好有同名账号且密码相同，会把 A 的密码写给 B 的账号，
+     *      并且**用 A 的身份登进了 B**（或者在 B 上留下 A 的凭据）。
+     * 两种结果都不可接受，所以改地址 = 换服务器 = 清空账号记忆。
+     *
+     * ===== 为什么不是"每敲一个字符就清" =====
+     * 那样用户输入 https://... 的过程中会不断清库（AES 解密 + commit 反复执行），
+     * 既慢又把日志刷满。这里做的是**防抖 + 归一化比较**：
+     *   - 输入还解析不出合法地址（正在打字）→ 不动；
+     *   - 归一化后与存储的 host 相同 → 不动（例如补了个尾斜杠、加了 https://）；
+     *   - 归一化后不同 → 清。
+     *
+     * 已知取舍：用户清空输入框再重敲同一个地址，中间那一刻不会清（解析返回 null）。
+     * 结果等价 —— 地址没变，不清正是对的。
+     */
+    private fun onHostEdited(raw: String) {
+        val spec = ApiClient.parseHost(raw) ?: return
+        if (hostClearedFor != null && hostClearedFor == spec.baseUrl) return
+        val saved = LoginFlow.peek(this) ?: return
+        if (saved.host == spec.baseUrl) return
+
+        // 换服务器：清空全部旧凭据（含密码与 cookie）。
+        // 为什么连 username 一起清：那是 A 服务器的账号名，留在 B 的输入框里会误导用户。
+        Log.i(TAG, "server changed, clearing stored credentials")
+        AccountStore.clearAll(this)
+        LoginDefaults.rememberHost(this, spec.baseUrl)
+        hostClearedFor = spec.baseUrl
+        suppressHostWatcher = true
+        try {
+            binding.usernameInput.setText("")
+            binding.passwordInput.setText("")
+        } finally {
+            suppressHostWatcher = false
+        }
+        pendingAutoLoginUsername = ""
+        pendingAutoLoginPassword = ""
+        binding.retryAutoLoginButton.visibility = View.GONE
+        binding.errorText.visibility = View.GONE
+    }
+
+    /** 防止 TextWatcher 自触发（setText 也会触发它）。 */
+    private var suppressHostWatcher = false
+
+    /** 已经因为"换服务器"清过的那一个 host，避免重复清。 */
+    private var hostClearedFor: String? = null
+
+    // ==========================================================================
+    // 手动登录
+    // ==========================================================================
+
+    /** 是否已经完成过一次 onResume：用来区分"首次进入"与"从别处返回"。 */
+    private var resumedOnce = false
+
+    /**
+     * 从 WebView 返回时的处理。
+     *
+     * 与 v0.2.0 的差别：现在存储里有账号，所以返回登录页时必须
+     * **预填 host + username、清空密码**（用户明确要求"密码留空"）。
+     */
+    override fun onResume() {
+        super.onResume()
+        if (resumedOnce) {
+            // 从 WebView 回来：密码框清掉（手机上最常见的事故是"人离开屏幕后密码还在框里"）。
+            binding.passwordInput.text?.clear()
+            setBusy(false)
+            // 重填 host / username（WebView 里可能刚退出登录，此时存储是空的，
+            // 于是回退到 LoginDefaults 里"上次用过的地址"——那个库刻意不被退出登录清除，
+            // 否则用户每次退出都要重新回忆域名）。
+            val account = LoginFlow.peek(this)
+            if (account != null) {
+                applyPrefillIfEmpty(account.host, account.username)
+            } else {
+                val last = LoginDefaults.lastHost(this)
+                if (last != null) applyPrefillIfEmpty(last, "")
+            }
+            // 自动重登的失败提示已经过时了（用户可能已在别处登录成功）：
+            // 只清掉提示文字，不动用户正在输入的密码。
+            binding.autoLoginHint.visibility = View.GONE
+        }
+        resumedOnce = true
+    }
+
+    /**
+     * 只填"用户没动过的框"。
+     *
+     * 为什么不能无条件覆盖：用户可能正在改地址（从 WebView 回来后又想换服务器），
+     * 覆盖回去会让人抓狂。判据是"框里现在是空的"。
+     */
+    private fun applyPrefillIfEmpty(host: String, username: String) {
+        suppressHostWatcher = true
+        try {
+            if (binding.hostInput.text.isNullOrEmpty()) binding.hostInput.setText(host)
+            if (binding.usernameInput.text.isNullOrEmpty()) binding.usernameInput.setText(username)
+        } finally {
+            suppressHostWatcher = false
+        }
+    }
+
+    /** 校验输入并发起登录。所有提前 return 的分支都在这里给出可见反馈，不留"点了没反应"。 */
+    private fun submit() {
+        if (busy) return
+        binding.errorText.visibility = View.GONE
+        binding.retryAutoLoginButton.visibility = View.GONE
+        clearPendingCredentials()
+
+        val host = ApiClient.parseHost(binding.hostInput.text?.toString().orEmpty())
+        if (host == null) {
+            showError(getString(R.string.error_host_invalid))
+            return
+        }
+        val username = binding.usernameInput.text?.toString()?.trim().orEmpty()
+        if (username.isEmpty()) {
+            showError(getString(R.string.error_username_empty))
+            return
+        }
+        val password = binding.passwordInput.text?.toString().orEmpty()
+        if (password.isEmpty()) {
+            showError(getString(R.string.error_password_empty))
+            return
+        }
+
+        // ===== 换服务器保护（第二道闸）=====
+        // host 输入框的 TextWatcher 已经处理了绝大多数情况，但有两种它兜不住：
+        //   ① 用户粘贴一个地址后立刻点登录（editText 的 afterTextChanged 还没跑到比较）；
+        //   ② Activity 重建后 hostClearedFor 清空，而存储里还是旧服务器的凭据。
+        // 这里在发请求前再比一次：地址不同 ⇒ 先清旧凭据，再登。
+        val saved = LoginFlow.peek(this)
+        if (saved != null && saved.host != host.baseUrl) {
+            Log.i(TAG, "server changed at submit, clearing stored credentials")
+            AccountStore.clearAll(this)
+        }
+
+        setBusy(true)
+        ApiClient.login(host, username, password) { result, error ->
+            // ApiClient 保证回调在主线程，这里可以直接操作 View。
+            // 必须防"回调晚于 Activity 销毁"：用户点登录后立刻按返回（或旋转屏幕），
+            // 请求仍在飞行中；此时操作 binding 会抛 IllegalStateException/NPE。
+            if (isFinishing || isDestroyed) return@login
+            setBusy(false)
+            if (result != null) {
+                // ===== 首次登录成功：存 host/username/password/cookie =====
+                // 写入在后台线程（commit 是阻塞 IO）；写入结果不阻塞跳转 ——
+                // "记不住"最多让用户下次重登，不该拦住本次使用。
+                persistAfterManualLogin(host.baseUrl, username, password, result)
+                openWebView(result, host.baseUrl)
+            } else if (error != null) {
+                showError(messageFor(error), error.debugText())
+            }
+        }
+    }
+
+    /**
+     * 手动登录成功 → 落存储。
+     *
+     * 为什么在这里、而不是在 LoginFlow 里做：
+     *   密码只有本方法栈里有（用户刚输入的）；LoginFlow 的 auto-login 路径
+     *   是"从存储读出来的密码再写回去"，它有自己的落盘逻辑。
+     *   两条路径共用 [AccountStore.saveAfterLogin]，保证只有一份写入实现。
+     */
+    private fun persistAfterManualLogin(
+        hostBaseUrl: String,
+        username: String,
+        password: String,
+        result: LoginResult,
+    ) {
+        val appContext = applicationContext
+        Thread({
+            try {
+                AccountStore.saveAfterLogin(
+                    context = appContext,
+                    host = hostBaseUrl,
+                    username = result.username.ifEmpty { username },
+                    password = password,
+                    cookieName = result.cookieName,
+                    cookieValue = result.cookieValue,
+                    cookieMaxAgeSeconds = result.cookieMaxAgeSeconds,
+                )
+                LoginDefaults.rememberHost(appContext, hostBaseUrl)
+            } catch (e: Exception) {
+                Log.w(TAG, "persist after login failed (" + e.javaClass.simpleName + ")")
+            }
+        }, "dsh-persist-login").apply { isDaemon = true }.start()
+    }
+
+    /**
+     * 把登录结果交给 WebView 容器（手动登录路径）。
+     *
+     * cookie 通过 Intent 传，但**只在同一进程的可信组件之间**
+     * （WebViewActivity exported=false，外部应用无法拉起）。
+     */
+    private fun openWebView(result: LoginResult, hostBaseUrl: String) {
+        // ===== 检查更新 =====
+        // 时机：登录成功之后、跳 WebView 之前。它是**唯一保证有 cookie 的位置**。
+        // v0.3.0 起会话上下文由 Updates 从 AccountStore 现读（上面刚异步写入，
+        // 多数情况下已就绪；若还没写完，本次检查会静默跳过 —— 由 WebView
+        // 首次 onPageFinished 的那次补上）。
+        Updates.checkQuietly(this)
+
+        val intent = Intent(this, WebViewActivity::class.java).apply {
+            putExtra(WebViewActivity.EXTRA_LAUNCH_URL, result.launchUrl)
+            putExtra(WebViewActivity.EXTRA_COOKIE_NAME, result.cookieName)
+            putExtra(WebViewActivity.EXTRA_COOKIE_VALUE, result.cookieValue)
+            putExtra(WebViewActivity.EXTRA_COOKIE_MAX_AGE, result.cookieMaxAgeSeconds)
+            putExtra(WebViewActivity.EXTRA_HOST, hostBaseUrl)
+        }
+        startActivity(intent)
+        // 不在登录页 finish()：用户从 WebView 返回时应当能回到这里重试。
+        // v0.3.0 保留此行为 —— 「退出登录」在 WebView 里，回来后本页会重填账号。
+    }
+
+    // ==========================================================================
+    // UI 辅助
+    // ==========================================================================
+
+    private fun isLightBackground(): Boolean {
+        val nightMode = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK
+        return nightMode != android.content.res.Configuration.UI_MODE_NIGHT_YES
+    }
+
+    private fun messageFor(error: LoginError): String = when (error) {
+        is LoginError.Network -> getString(R.string.error_network)
+        is LoginError.Timeout -> getString(R.string.error_timeout)
+        is LoginError.InvalidCredentials -> getString(R.string.error_401)
+        is LoginError.TooManyAttempts -> getString(R.string.error_429)
+        is LoginError.ServiceUnavailable -> getString(R.string.error_503)
+        is LoginError.EndpointNotFound -> getString(R.string.error_404)
+        is LoginError.BadResponse -> getString(R.string.error_bad_response)
+        is LoginError.InvalidInput -> getString(R.string.error_host_invalid)
+        is LoginError.Http -> getString(R.string.error_server, error.code)
+    }
+
+    /** 错误区 = 一句人话 + 一行原始描述。原始描述是排查的唯一线索，不要删。 */
+    private fun showError(message: String, detail: String? = null) {
+        val text = if (detail.isNullOrEmpty()) message else message + "\n" + detail
+        binding.errorText.text = text
+        binding.errorText.visibility = View.VISIBLE
+    }
+
+    private var busy = false
+
+    /** 统一"忙碌"态：按钮禁用 + 文案切换 + 转圈。避免连点产生多次登录（服务端按 IP 计数，会很快触发 429）。 */
+    private fun setBusy(b: Boolean) {
+        busy = b
+        binding.loginButton.isEnabled = !b
+        binding.loginButton.text = getString(
+            if (b) R.string.action_login_in_progress else R.string.action_login,
+        )
+        binding.loginProgress.visibility = if (b) View.VISIBLE else View.GONE
+        binding.hostInput.isEnabled = !b
+        binding.usernameInput.isEnabled = !b
+        binding.passwordInput.isEnabled = !b
+    }
+
+    override fun onDestroy() {
+        clearPendingCredentials()
+        super.onDestroy()
+    }
+}
