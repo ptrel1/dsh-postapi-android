@@ -187,4 +187,42 @@
     <string name="permission_request_message">本应用没有申请麦克风/摄像头权限，即使允许，系统仍可能拒绝实际使用。一般直接拒绝即可，改用文字输入。</string>
     <string name="permission_request_allow">仍要允许</string>
     <string name="permission_request_deny">拒绝</string>
+
+    <!-- ==================== v0.5.0：使用模式选择 ====================
+         两种模式的关系不是「新旧」，而是「功能全 vs 轻快稳定」：
+         完整模式是 WebView 承载 DSH 网页，功能与电脑端一致，但依赖系统 WebView 内核
+         （旧内核如 Chrome 114 会卡）；兼容模式是纯原生界面，只要核心功能，
+         但不依赖 WebView 内核。文案必须把「缺什么」说清楚，
+         否则用户选了兼容模式后发现功能少了会觉得是 bug。 -->
+
+    <string name="mode_title">选择使用方式</string>
+    <string name="mode_subtitle">两种方式共用同一个账号和会话，随时可以在设置里切换</string>
+
+    <string name="mode_full_title">完整模式</string>
+    <string name="mode_full_tagline">功能完整 · 与电脑端一致</string>
+    <string name="mode_full_features">· 全部功能：交付物下载、命令、@提及、审批、模型切换
+· 界面与电脑端相同
+· 依赖系统 WebView 内核，旧机型可能卡顿</string>
+
+    <string name="mode_compat_title">兼容模式</string>
+    <string name="mode_compat_tagline">轻快稳定 · 只要核心功能</string>
+    <string name="mode_compat_features">· 会话列表、看消息、发消息
+· 原生界面，打字和流式输出流畅
+· 暂不支持交付物下载、命令、@提及（会自动切到完整模式）</string>
+
+    <string name="mode_compat_not_recommended">当前设备 WebView 内核较旧，可能更适合兼容模式</string>
+    <string name="mode_confirm">使用这个方式</string>
+    <string name="mode_remember_hint">选择会记住，下次启动直接进入</string>
+
+    <!-- 兼容模式占位界面（原生聊天界面开发中） -->
+    <string name="compat_placeholder_title">兼容模式</string>
+    <string name="compat_placeholder_body">原生聊天界面正在开发中。
+
+当前可以先切回完整模式使用全部功能。</string>
+    <string name="compat_switch_to_full">切换到完整模式</string>
+    <string name="compat_logout">退出登录</string>
+
+    <!-- 设置里的模式切换入口 -->
+    <string name="mode_switch_title">切换使用方式</string>
+    <string name="mode_switch_current">当前：%1$s</string>
 </resources>

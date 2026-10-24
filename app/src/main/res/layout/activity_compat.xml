@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  v0.5.0：兼容模式占位界面。
+
+  为什么先给占位而不是直接做原生聊天界面：
+    原生聊天界面（会话列表 + 消息流式渲染 + 输入框）是 2~3 周的工作量，
+    而「模式切换」本身已经是完整可用的功能 —— 先让它落地，用户能立刻用上并反馈。
+    占位页必须把「现在能做什么」说清楚，并提供**一键切回完整模式**，
+    否则用户选了兼容模式后发现是空的，会以为是坏了。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="32dp"
+    android:background="?android:attr/colorBackground">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/compat_placeholder_title"
+        android:textSize="22sp"
+        android:textStyle="bold"
+        android:textColor="?android:attr/textColorPrimary" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:gravity="center"
+        android:text="@string/compat_placeholder_body"
+        android:textSize="14sp"
+        android:lineSpacingExtra="4dp"
+        android:textColor="?android:attr/textColorSecondary" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/switchToFull"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="28dp"
+        android:text="@string/compat_switch_to_full" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/compatLogout"
+        style="@style/Widget.Material3.Button.TextButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="@string/compat_logout" />
+</LinearLayout>

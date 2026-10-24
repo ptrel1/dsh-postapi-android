@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  v0.5.0：使用方式选择页。
+
+  设计取舍（为什么是两张可点卡片，而不是单选 + 确定按钮）：
+    1. 用户此刻只做一件事 —— 选一个。单选钮 + 确定 = 两步，多一次点击且没有额外信息。
+    2. 卡片本身就是按钮，整块可点，热区大，手机上好按。
+    3. 每张卡片直接列出「有/没有」什么，用户在**点击之前**就知道代价，
+       不会选完才发现功能少了（那会被当成 bug 而不是设计）。
+
+  为什么不是一进来就默认某种模式：
+    默认任何一种都会有用户不满意，而且新用户永远看不到这段说明
+    （直接进 WebView，出问题也不知道还有另一条路）。
+-->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true"
+    android:background="?android:attr/colorBackground">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:paddingTop="32dp"
+        android:paddingBottom="32dp">
+
+        <TextView
+            android:id="@+id/modeTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/mode_title"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:textColor="?android:attr/textColorPrimary" />
+
+        <TextView
+            android:id="@+id/modeSubtitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="@string/mode_subtitle"
+            android:textSize="13sp"
+            android:textColor="?android:attr/textColorSecondary" />
+
+        <!-- ============ 兼容模式卡片 ============ -->
+        <LinearLayout
+            android:id="@+id/cardCompat"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:orientation="vertical"
+            android:padding="18dp"
+            android:background="@drawable/bg_card"
+            android:clickable="true"
+            android:focusable="true"
+            android:foreground="?android:attr/selectableItemBackground">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/mode_compat_title"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:textColor="?android:attr/textColorPrimary" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="@string/mode_compat_tagline"
+                android:textSize="13sp"
+                android:textColor="?android:attr/colorAccent" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="@string/mode_compat_features"
+                android:textSize="13sp"
+                android:lineSpacingExtra="4dp"
+                android:textColor="?android:attr/textColorSecondary" />
+
+            <!-- 仅在检测到旧 WebView 内核时显示，由代码控制可见性 -->
+            <TextView
+                android:id="@+id/compatHint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="@string/mode_compat_not_recommended"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="?android:attr/colorAccent"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <!-- ============ 完整模式卡片 ============ -->
+        <LinearLayout
+            android:id="@+id/cardFull"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:orientation="vertical"
+            android:padding="18dp"
+            android:background="@drawable/bg_card"
+            android:clickable="true"
+            android:focusable="true"
+            android:foreground="?android:attr/selectableItemBackground">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/mode_full_title"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:textColor="?android:attr/textColorPrimary" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="@string/mode_full_tagline"
+                android:textSize="13sp"
+                android:textColor="?android:attr/colorAccent" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="@string/mode_full_features"
+                android:textSize="13sp"
+                android:lineSpacingExtra="4dp"
+                android:textColor="?android:attr/textColorSecondary" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:gravity="center"
+            android:text="@string/mode_remember_hint"
+            android:textSize="12sp"
+            android:textColor="?android:attr/textColorSecondary" />
+    </LinearLayout>
+</ScrollView>

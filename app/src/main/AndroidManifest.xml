@@ -62,6 +62,19 @@
             </intent-filter>
         </activity>
 
+        <!-- v0.5.0：使用方式选择页。不导出 —— 只有登录成功后由 LoginActivity 拉起，
+             外部应用直接启动它没有意义（还没登录，选完也进不去任何界面）。 -->
+        <activity
+            android:name=".ModeSelectActivity"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
+            android:exported="false" />
+
+        <!-- v0.5.0：兼容模式入口（当前为占位页）。同 ModeSelectActivity，不导出。 -->
+        <activity
+            android:name=".CompatActivity"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
+            android:exported="false" />
+
         <!--
           WebViewActivity 用 adjustNothing（v0.4.5）—— 键盘让位完全由 App 自己用
           translationY 完成（见 WindowInsetsHelper.applySystemBarPadding 的 translateForIme）。

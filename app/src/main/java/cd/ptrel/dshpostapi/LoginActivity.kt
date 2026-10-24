@@ -52,6 +52,9 @@ class LoginActivity : AppCompatActivity() {
          * 新旧实例并存，任何进程级标志都难以区分"用户主动退出"与"被系统重建"。
          */
         const val EXTRA_AUTO_LOGIN = "cd.ptrel.dshpostapi.EXTRA_AUTO_LOGIN"
+
+        /** 交给 [ModeSelectActivity] 的服务端根地址（选项页不导航，只把它带到下一个界面）。 */
+        const val EXTRA_PENDING_HOST = "cd.ptrel.dshpostapi.EXTRA_PENDING_HOST"
     }
 
     private lateinit var binding: ActivityLoginBinding
@@ -217,8 +220,58 @@ class LoginActivity : AppCompatActivity() {
         }
     }
 
+    // ==========================================================================
+    // v0.5.0：使用模式分发
+    // ==========================================================================
+
     /**
-     * 「cookie 仍有效」路径：不经过登录，直接进 WebView。
+     * 按已保存的使用模式进对应界面；**从没选过则先让用户选**。
+     *
+     * @param launchUrl 一次性登录 token 的导航地址；空串表示 resume（复用 CookieManager 里的 cookie）。
+     * @param hostBaseUrl 服务端根地址，兼容模式不用但完整模式需要。
+     *
+     * 为什么模式判定放在 LoginActivity 而不是各目标界面自己判：
+     *   目标界面（WebViewActivity）是被动容器，它不该知道"还有另一种模式"这回事；
+     *   分发是登录页的职责，且这里已经有全部上下文（launchUrl / host / cookie）。
+     */
+    private fun routeToConfiguredMode(launchUrl: String, hostBaseUrl: String) {
+        when (AppPrefs.getUiMode(this)) {
+            null -> {
+                // 从没选过：先选。**不传 launchUrl** —— 这枚 token 是一次性的，
+                // 若在选择页停留期间被消费（例如系统回收后用旧参数重建），
+                // 再导航就会 401。让目标界面自己走 resume 语义更安全
+                // （cookie 已经在上面种好了，根路径导航即可）。
+                startActivity(Intent(this, ModeSelectActivity::class.java).apply {
+                    putExtra(EXTRA_PENDING_HOST, hostBaseUrl)
+                })
+            }
+            AppPrefs.UI_MODE_COMPAT -> enterConfiguredMode(CompatActivity::class.java, launchUrl, hostBaseUrl)
+            else -> enterConfiguredMode(WebViewActivity::class.java, launchUrl, hostBaseUrl)
+        }
+        finish()
+    }
+
+    /**
+     * 进某个具体界面（两种模式共用）。
+     *
+     * launchUrl 为空时用 EXTRA_RESUME_MODE（复用 CookieManager 已有 cookie），
+     * 否则把 launchUrl 交出去让目标界面做那一次导航（官方 BrowserAuth 只在那一次请求上铸 cookie）。
+     */
+    private fun enterConfiguredMode(target: Class<*>, launchUrl: String, hostBaseUrl: String? = null) {
+        val intent = Intent(this, target)
+        if (launchUrl.isEmpty()) {
+            intent.putExtra(WebViewActivity.EXTRA_RESUME_MODE, true)
+        } else {
+            intent.putExtra(WebViewActivity.EXTRA_LAUNCH_URL, launchUrl)
+        }
+        if (!hostBaseUrl.isNullOrEmpty()) {
+            intent.putExtra(WebViewActivity.EXTRA_HOST, hostBaseUrl)
+        }
+        startActivity(intent)
+    }
+
+    /**
+     * 的「cookie 仍有效」路径：不经过登录，直接进 WebView。
      *
      * 此时没有新的 launchUrl（一次性 token 早已消费），所以：
      *   - 加载地址 = host 根路径；
@@ -233,12 +286,7 @@ class LoginActivity : AppCompatActivity() {
         // 内存上下文里，UpdateSession 从 AccountStore 读（那里存着登录时那份），
         // 所以这里不需要额外做什么。若存储里没有 cookie（例如上一版残留），
         // Updates.checkQuietly 会静默返回，不会误报。
-        val intent = Intent(this, WebViewActivity::class.java).apply {
-            putExtra(WebViewActivity.EXTRA_LAUNCH_URL, url)
-            // cookie 三件套留空 ⇒ WebViewActivity 走"复用 CookieManager 已有 cookie"分支。
-            putExtra(WebViewActivity.EXTRA_RESUME_MODE, true)
-        }
-        startActivity(intent)
+        enterConfiguredMode(WebViewActivity::class.java, url)
         finish()
     }
 
@@ -339,14 +387,7 @@ class LoginActivity : AppCompatActivity() {
      */
     private fun openWebViewWithLaunchUrl(launchUrl: String, hostBaseUrl: String) {
         Updates.checkAfterLogin(this)
-        val intent = Intent(this, WebViewActivity::class.java).apply {
-            putExtra(WebViewActivity.EXTRA_LAUNCH_URL, launchUrl)
-            putExtra(WebViewActivity.EXTRA_HOST, hostBaseUrl)
-            // cookie 已由 LoginFlow 种入 CookieManager，这里用 resume 语义：
-            // WebViewActivity 不会再种一次（避免 Max-Age 被重置成另一个值）。
-            putExtra(WebViewActivity.EXTRA_RESUME_MODE, true)
-        }
-        startActivity(intent)
+        enterConfiguredMode(WebViewActivity::class.java, launchUrl, hostBaseUrl)
         finish()
     }
 
@@ -618,14 +659,35 @@ class LoginActivity : AppCompatActivity() {
         // 首次 onPageFinished 的那次补上）。
         Updates.checkAfterLogin(this)
 
-        val intent = Intent(this, WebViewActivity::class.java).apply {
-            putExtra(WebViewActivity.EXTRA_LAUNCH_URL, result.launchUrl)
-            putExtra(WebViewActivity.EXTRA_COOKIE_NAME, result.cookieName)
-            putExtra(WebViewActivity.EXTRA_COOKIE_VALUE, result.cookieValue)
-            putExtra(WebViewActivity.EXTRA_COOKIE_MAX_AGE, result.cookieMaxAgeSeconds)
-            putExtra(WebViewActivity.EXTRA_HOST, hostBaseUrl)
+        // ==================== v0.5.0：先决定进哪个模式 ====================
+        // 三种可能：
+        //   ① 从没选过（getUiMode = null）→ 进模式选择页。**这是唯一会看到选择页的路径**，
+        //      且只在前两处（resume / 自动重登）与这里之一触发一次。
+        //   ② 选过兼容模式 → 进 CompatActivity（原生界面）
+        //   ③ 选过完整模式 → 进 WebViewActivity（与旧行为完全一致）
+        //
+        // ⚠️ 登录响应里的 cookie 三件套**必须在这里种进 CookieManager**，不能留给目标界面：
+        //    WebViewActivity 收到三件套会自己种；但如果进的是 CompatActivity（原生界面），
+        //    它不碰 CookieManager，cookie 就丢了 —— 下次启动判定为"未登录"，
+        //    用户会莫名其妙被踢回登录页。所以先种、再分发。
+        // 把 cookie 种进 CookieManager（origin 只到 authority，不显式写 domain，必须 flush）。
+        // ⚠️ 为什么必须在这里种、不能留给目标界面：
+        //    完整模式（WebViewActivity）收到三件套会自己种，但兼容模式（CompatActivity）
+        //    根本不碰 CookieManager —— cookie 丢了下次启动就判定"未登录"，用户被莫名踢回登录页。
+        //    先种、再分发，两种模式都不会丢。
+        try {
+            val origin = android.net.Uri.parse(result.launchUrl)
+            val authority = origin.scheme + "://" + origin.authority
+            val cookie = result.cookieName + "=" + result.cookieValue +
+                "; Path=/; Max-Age=" + result.cookieMaxAgeSeconds + "; SameSite=Lax"
+            android.webkit.CookieManager.getInstance().setCookie(authority, cookie)
+            android.webkit.CookieManager.getInstance().flush()
+        } catch (e: Exception) {
+            // 种失败不阻断：launchUrl 那次导航本身会铸出官方 cookie；
+            // 插件 cookie 缺失表现为"页面能开、插件功能 401"，用户可点重新登录。
+            android.util.Log.w("LoginActivity", "seed cookie failed (" + e.javaClass.simpleName + ")")
         }
-        startActivity(intent)
+        routeToConfiguredMode(result.launchUrl, hostBaseUrl)
         // 不在登录页 finish()：用户从 WebView 返回时应当能回到这里重试。
         // v0.3.0 保留此行为 —— 「退出登录」在 WebView 里，回来后本页会重填账号。
     }
