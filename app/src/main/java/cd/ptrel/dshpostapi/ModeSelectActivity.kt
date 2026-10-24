@@ -83,28 +83,34 @@ class ModeSelectActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * 选完模式后进目标界面。
+     *
+     * ⚠️ 必须给 WebViewActivity 一个非空 launchUrl：它把 launchUrl 为空视为
+     * "被外部应用直接拉起"并立刻 finish（见 WebViewActivity.onCreate）。
+     * 只传 EXTRA_RESUME_MODE 会导致目标页秒退、本页也已 finish ⇒ 栈空 ⇒ 回桌面。
+     * resume 语义下用服务端根路径即可（cookie 已在 CookieManager 里）。
+     */
     private fun choose(mode: String) {
-        // 写入结果即使失败也继续 —— 本次进程内仍会按选择走，
-        // 只是下次启动要再选一次。不因为"记不住"就阻断用户。
         if (!AppPrefs.setUiMode(this, mode)) {
             Log.w(TAG, "persist ui mode failed, continuing for this session")
         }
-        val target = if (mode == AppPrefs.UI_MODE_COMPAT) {
-            CompatActivity::class.java
-        } else {
-            WebViewActivity::class.java
+        if (mode == AppPrefs.UI_MODE_COMPAT) {
+            startActivity(Intent(this, CompatActivity::class.java))
+            finish()
+            return
         }
-        startActivity(Intent(this, target).apply {
-            // 两种模式共用同一份登录凭据与 cookie（都在 AccountStore / CookieManager 里），
-            // 所以这里只需要交回 host，目标界面其余的自己从存储读。
-            //
-            // ⚠️ 用 RESUME_MODE 而不是带 launchUrl：那枚一次性 token 到这一步**极可能已被消费**
-            //    （登录时已用它换过 cookie，见 LoginActivity.routeToConfiguredMode 的说明）。
-            //    这里导航根路径即可 —— cookie 已经种进 CookieManager 了。
+        val account = AccountStore.load(this)
+        val rootUrl = account?.host?.let { host -> ApiClient.parseHost(host)?.let { it.baseUrl + "/" } }
+        if (rootUrl == null) {
+            Log.w(TAG, "no stored host, back to login")
+            startActivity(Intent(this, LoginActivity::class.java).putExtra(LoginActivity.EXTRA_AUTO_LOGIN, false))
+            finish()
+            return
+        }
+        startActivity(Intent(this, WebViewActivity::class.java).apply {
+            putExtra(WebViewActivity.EXTRA_LAUNCH_URL, rootUrl)
             putExtra(WebViewActivity.EXTRA_RESUME_MODE, true)
-            intent.getStringExtra(LoginActivity.EXTRA_PENDING_HOST)?.let {
-                putExtra(WebViewActivity.EXTRA_HOST, it)
-            }
         })
         finish()
     }

@@ -36,16 +36,31 @@ class CompatActivity : AppCompatActivity() {
         }
     }
 
+    // v0.5.2：切模式必须给 WebViewActivity 一个非空的 launchUrl。
+    // 它 onCreate 里有 if (launchUrl.isEmpty()) { finish(); return } —— 那是防
+    // 被外部应用直接拉起的护栏。只传 EXTRA_RESUME_MODE 会被它当成
+    // 参数不全立刻 finish；而本页也 finish ⇒ 栈空 ⇒ 直接回系统桌面（实测踩过）。
+    // resume 语义下用服务端根路径即可：cookie 已在 CookieManager 里。
     private fun switchMode(mode: String) {
         AppPrefs.setUiMode(this, mode)
-        val target = if (mode == AppPrefs.UI_MODE_COMPAT) {
-            CompatActivity::class.java
-        } else {
-            WebViewActivity::class.java
+        if (mode == AppPrefs.UI_MODE_COMPAT) {
+            startActivity(Intent(this, CompatActivity::class.java))
+            finish()
+            return
         }
-        startActivity(Intent(this, target).apply {
+        val account = AccountStore.load(this)
+        val rootUrl = account?.host?.let { host -> ApiClient.parseHost(host)?.let { it.baseUrl + "/" } }
+        if (rootUrl == null) {
+            android.util.Log.w("CompatActivity", "no stored host, back to login")
+            startActivity(Intent(this, LoginActivity::class.java).putExtra(LoginActivity.EXTRA_AUTO_LOGIN, false))
+            finish()
+            return
+        }
+        startActivity(Intent(this, WebViewActivity::class.java).apply {
+            putExtra(WebViewActivity.EXTRA_LAUNCH_URL, rootUrl)
             putExtra(WebViewActivity.EXTRA_RESUME_MODE, true)
         })
         finish()
     }
+
 }

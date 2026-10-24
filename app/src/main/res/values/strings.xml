@@ -225,4 +225,13 @@
     <!-- 设置里的模式切换入口 -->
     <string name="mode_switch_title">切换使用方式</string>
     <string name="mode_switch_current">当前：%1$s</string>
+
+    <!-- v0.5.2：登录页内嵌的模式切换行 -->
+    <string name="mode_row_label">使用方式</string>
+    <string name="mode_dialog_title">选择使用方式</string>
+    <string name="mode_dialog_confirm">确定</string>
+    <string name="mode_dialog_cancel">取消</string>
+    <string name="mode_full_desc">功能完整，与电脑端一致；依赖系统 WebView 内核，旧机型可能卡顿</string>
+    <string name="mode_compat_desc">轻快稳定；暂只支持会话列表与发消息，交付物/命令等需切回完整模式</string>
+    <string name="mode_compat_coming">原生聊天界面正在开发中，当前为占位页</string>
 </resources>

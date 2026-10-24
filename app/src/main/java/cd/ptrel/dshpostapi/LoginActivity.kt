@@ -104,6 +104,8 @@ class LoginActivity : AppCompatActivity() {
         // 否则用户想换人用/卖手机时没有可用的动作。这里放一个**次要链接**：
         // 低频、不可逆、且会让用户重敲三样东西，不该做成与「登录」同等重量的按钮。
         binding.clearAccountLink.setOnClickListener { confirmClearAccount() }
+        // v0.5.2：使用方式切换（登录页内嵌，不跳页）。
+        setupModeRow()
 
         // 地址被用户改动 ⇒ 视为换服务器，清掉旧账号的密码与 cookie。
         // 只监听 hostInput，且只在"已有账号且新地址与旧地址不同"时动手（见 onHostEdited）。
@@ -235,16 +237,14 @@ class LoginActivity : AppCompatActivity() {
      *   分发是登录页的职责，且这里已经有全部上下文（launchUrl / host / cookie）。
      */
     private fun routeToConfiguredMode(launchUrl: String, hostBaseUrl: String, finishSelf: Boolean = true) {
+        // v0.5.2：不再跳独立的模式选择页。
+        // 原因（设计心理学）：用户已到登录页，目标是"进去"；再插一页是在目标前加障碍
+        // （目标梯度效应），且登录后跳新页面时用户注意力在"登录成功了吗"，
+        // 根本看不见新页面的内容（变更盲视）。
+        // 改成登录页上一行常驻开关（见 activity_login.xml 的 modeRow），原地切换、状态可见。
+        //
+        // 默认 = 完整模式：老用户行为完全不变（他们本来就是进 WebView）。
         when (AppPrefs.getUiMode(this)) {
-            null -> {
-                // 从没选过：先选。**不传 launchUrl** —— 这枚 token 是一次性的，
-                // 若在选择页停留期间被消费（例如系统回收后用旧参数重建），
-                // 再导航就会 401。让目标界面自己走 resume 语义更安全
-                // （cookie 已经在上面种好了，根路径导航即可）。
-                startActivity(Intent(this, ModeSelectActivity::class.java).apply {
-                    putExtra(EXTRA_PENDING_HOST, hostBaseUrl)
-                })
-            }
             AppPrefs.UI_MODE_COMPAT -> enterConfiguredMode(CompatActivity::class.java, launchUrl, hostBaseUrl)
             else -> enterConfiguredMode(WebViewActivity::class.java, launchUrl, hostBaseUrl)
         }
@@ -271,6 +271,89 @@ class LoginActivity : AppCompatActivity() {
             intent.putExtra(WebViewActivity.EXTRA_HOST, hostBaseUrl)
         }
         startActivity(intent)
+    }
+
+    // ==========================================================================
+    // v0.5.2：登录页内嵌的模式切换
+    // ==========================================================================
+
+    /**
+     * 把「使用方式」那一行接到点击事件上，并回填当前值。
+     *
+     * 为什么放在登录页而不是另开一页 —— 见 activity_login.xml 里 modeRow 的注释
+     * （目标梯度效应 + 变更盲视 + 状态必须可见）。
+     *
+     * 为什么是 Dialog 而不是下拉/Spinner：
+     *   两个选项各自有一句「它意味着什么」的说明，Spinner 一行放不下；
+     *   而且 Spinner 的选中态不好表达"当前值"。Dialog 能容纳解释、且取消零成本。
+     */
+    private fun setupModeRow() {
+        binding.modeRow.setOnClickListener { showModeDialog() }
+        refreshModeRow()
+    }
+
+    /** 回填模式行右侧的当前值。 */
+    private fun refreshModeRow() {
+        val compat = AppPrefs.getUiMode(this) == AppPrefs.UI_MODE_COMPAT
+        binding.modeValue.text = getString(
+            if (compat) R.string.mode_compat_title else R.string.mode_full_title,
+        )
+    }
+
+    /**
+     * 弹「选择使用方式」。
+     *
+     * 用单选 + 确定（而不是点一下立即生效）：
+     *   两个选项的代价不对称 —— 兼容模式缺功能。让用户看清说明再确认，
+     *   比"误点了立刻切走"更稳。取消 = 什么都没发生，零成本。
+     */
+    /**
+     * 弹「选择使用方式」。
+     *
+     * 用单选 + 确定（而不是点一下立即生效）：
+     *   两个选项的代价不对称 —— 兼容模式缺功能。让用户看清说明再确认，
+     *   比"误点了立刻切走"更稳。取消 = 什么都没发生，零成本。
+     *
+     * ⚠️ 不要把说明放进 setMessage()：
+     *   AlertDialog 的 setMessage 和 setSingleChoiceItems **共用同一个内容槽**，
+     *   先设 message 会把后面的 ListView 盖掉 —— 表现是"只有一行说明，选项不见了"（实测踩过）。
+     *   正确做法是把说明并进每个选项的标题文字里，多行也照样显示。
+     */
+    private fun showModeDialog() {
+        val modes = arrayOf(AppPrefs.UI_MODE_FULL, AppPrefs.UI_MODE_COMPAT)
+        val titles = arrayOf(
+            getString(R.string.mode_full_title) + "\n" + getString(R.string.mode_full_desc),
+            getString(R.string.mode_compat_title) + "\n" + getString(R.string.mode_compat_desc),
+        )
+        val current = AppPrefs.getUiMode(this) ?: AppPrefs.UI_MODE_FULL
+        var picked = if (current == AppPrefs.UI_MODE_COMPAT) 1 else 0
+
+        // 自定义带两行文字的列表项：系统 simple_list_item_single_choice 是单行的，
+        // 第二行会被截断或挤在一起，读不清楚。
+        val adapter = object : android.widget.ArrayAdapter<String>(this, 0, titles) {
+            override fun getView(position: Int, convertView: android.view.View?, parent: android.view.ViewGroup): android.view.View {
+                val v = convertView ?: layoutInflater.inflate(
+                    android.R.layout.simple_list_item_single_choice, parent, false,
+                )
+                (v as android.widget.CheckedTextView).text = getItem(position)
+                v.textSize = 14f
+                v.setLineSpacing(0f, 1.25f)
+                return v
+            }
+        }
+
+        android.app.AlertDialog.Builder(this)
+            .setTitle(R.string.mode_dialog_title)
+            .setSingleChoiceItems(adapter, picked) { _, which -> picked = which }
+            .setPositiveButton(R.string.mode_dialog_confirm) { _, _ ->
+                if (!AppPrefs.setUiMode(this, modes[picked])) {
+                    android.util.Log.w("LoginActivity", "persist ui mode failed")
+                }
+                // 只刷新登录页那一行显示；模式在登录时才真正生效，不需要重启界面。
+                refreshModeRow()
+            }
+            .setNegativeButton(R.string.mode_dialog_cancel, null)
+            .show()
     }
 
     /**
