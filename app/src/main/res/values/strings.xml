@@ -84,6 +84,47 @@
     <string name="update_error_not_ready">服务端还没有放好安装包，请稍后再试。</string>
     <string name="update_error_generic">下载未完成，请重试。</string>
 
+    <!-- ===== 诊断模式（v0.4.8）=====
+         用途：排查「切换会话后侧栏自动收起失效」。开启后插件（v1.7.1）会在页面上
+         采集判定过程并画一个诊断浮层；关掉即停止（浮层同时移除）。
+
+         文案原则：抽屉里的开关本身要保持短（"诊断模式"），所以**状态**不进文字，
+         而是靠开关位置 + 一条"开启后"的提示条来说明（见 diag_mode_on_hint）。
+         这不是普通用户功能，措辞可以直接说清它是排查用的，不必装可爱。 -->
+    <string name="diag_mode">诊断模式</string>
+    <!-- 开启后的可见提示（抽屉里开关下方的一行小字）。
+         为什么必须有：开关一旦忘关，页面会一直保留诊断浮层、插件也一直在采集 ——
+         用户看到这句话才知道"这东西还在跑，可以关掉了"。 -->
+    <string name="diag_mode_on_hint">诊断已开启：页面右上角会显示诊断浮层。排查完请关闭。</string>
+    <!-- 网页侧接口没就绪时的反馈（插件未注入 / 版本低于 v1.7.1）。
+         必须给用户一个可行动的下一步，不能静默 —— 否则用户会以为开关坏了。 -->
+    <string name="diag_mode_unavailable">网页侧诊断接口尚未就绪（插件需 v1.7.1 及以上）。开关已记下，页面加载完成后会自动重试。</string>
+
+    <!-- ===== 检查更新：入口与「已是最新」（v0.4.0）=====
+         用户反馈「更新之后又提示需要更新，给个弹窗说已是最新就自己消失」。
+         现在的规则（用户确认的方案）：
+           · 自动检查（启动/登录后）→ 有新版本才弹，已最新**完全静默**；
+           · 用户主动点「检查更新」→ 已最新则弹 Toast，3 秒自动消失。
+         所以下面这条文案只会出现在"用户主动查"的场景，用词要短、不打断操作。 -->
+    <string name="update_check_action">检查更新</string>
+    <string name="update_up_to_date">已是最新版本（v%1$s）</string>
+    <!-- 用户主动点了检查、但请求失败：必须给反馈（静默等于"点了没反应"）。
+         正文带原始原因，便于用户判断是网络还是服务端。 -->
+    <string name="update_check_failed">检查更新失败：%1$s</string>
+    <!-- 服务端返回了响应但解析不出（契约变化/被反代改写）：比通用失败更精确一点。 -->
+    <string name="update_check_failed_empty">检查更新失败：服务端返回了无法识别的版本信息</string>
+
+    <!-- ===== 清除已保存的账号（v0.4.0，问题 ③）=====
+         与「退出登录」严格区分：退出登录只结束会话，这里才会把地址/用户名/密码一起抹掉。
+         文案必须让用户在点之前就知道"之后要重新填三样东西"。 -->
+    <string name="clear_account_link">清除已保存的账号</string>
+    <string name="clear_account_title">清除已保存的账号</string>
+    <string name="clear_account_message">将从本机删除服务地址、用户名、密码与登录状态，且无法撤销。下次打开需要重新填写全部信息。
+
+只是想换个账号或结束本次登录，用「退出登录」即可，不需要清除账号。</string>
+    <string name="clear_account_action">清除</string>
+    <string name="clear_account_done">已清除本机保存的账号</string>
+
     <!-- ===== 账号本地记忆 / 自动重登（v0.3.0）=====
          文案原则同上面几条：每一条都要说清"发生了什么"和"你现在能做什么"，
          不能只说"登录失败"——自动重登与用户手动点登录，用户的心理预期不同。 -->
@@ -96,13 +137,54 @@
     <string name="auto_login_host_invalid">保存的服务地址无法解析，请重新填写服务地址。</string>
     <string name="auto_login_retry_unavailable">已没有可自动登录的账号，请手动输入密码。</string>
 
-    <!-- ===== 退出登录（v0.3.0）=====
+    <!-- ===== 退出登录（v0.3.0，v0.4.0 改语义）=====
          「退出登录」与「返回登录」是两件事，文案必须区分：
-         前者清除本机记录，后者只是重新登一次同一个账号。 -->
+         前者结束会话，后者只是重新登一次同一个账号。
+
+         v0.4.0（问题 ③）：退出登录**不再**清地址/用户名/密码 —— 用户反馈"退出后要重新输入"
+         是设计错误。所以文案必须改成"结束这次登录"，否则用户会以为账号被清了。
+         彻底清除的入口在登录页（clear_account_link），两者文案要能一眼区分。 -->
     <string name="logout_title">退出登录</string>
-    <string name="logout_short">退出</string>
-    <string name="logout_message">将清除本机保存的账号、密码与登录状态，下次打开需要重新输入。确定退出？</string>
+    <string name="logout_short">菜单</string>
+    <!-- v0.4.1：原用于右侧抽屉的标题文案。
+         v0.4.11：抽屉标题已从布局里删除（只有 4 项，标题没有信息量）。
+         ⚠️ 这条字符串**必须保留** —— 它仍是悬浮按钮的 contentDescription
+         （activity_webview.xml 的 logoutFab），读屏用户靠它知道这个按钮是什么。
+         删掉会让无障碍朗读变成「按钮」，入口对读屏用户即等于消失。 -->
+    <string name="app_menu_title">更多</string>
+    <!-- ===== 切换桌面版 / 移动版（v0.4.11）=====
+         文案由代码按当前状态动态设置：手机模式显示"切换桌面版"，桌面模式显示"切换移动版"
+         （按钮上的字说的是**点下去会发生什么**，不是当前状态 —— 与开关类控件相反，
+           因为这是动作按钮，不是状态指示器）。
+         DSH 是纯 CSS 响应式、不看 UA，切换的实质是把 viewport 的宽度在
+         device-width 与 980 之间来回切（见 WebViewActivity.applyDesktopViewport）。 -->
+    <string name="switch_to_desktop">切换桌面版</string>
+    <string name="switch_to_mobile">切换移动版</string>
+    <string name="app_menu_version_format">DSH PostAPI v%1$s (%2$d)</string>
+    <string name="logout_message">将结束本次登录并清除登录状态。本机保存的服务地址、用户名与密码会保留，下次打开可直接登录。确定退出？</string>
     <string name="logout_action_confirm">退出登录</string>
     <string name="logout_action_cancel">取消</string>
-    <string name="logout_done">已退出登录</string>
+    <string name="logout_done">已退出登录，账号已保存在本机</string>
+
+    <!-- ===== 文件选择器 / 网页权限请求（v0.3.1）=====
+         用户反馈「无法上传文件」的根因是没有 WebChromeClient（见 WebViewActivity）。
+         这几条都是**兜底路径**的文案，正常使用不会看到。 -->
+    <!-- 极少数精简 ROM 没有系统文件选择器：必须明确告诉用户「无法选择文件」，
+         否则点击上传没有任何反应，与修复前的现象一模一样，用户无法区分。 -->
+    <!-- 拍照路径失败（建不出临时文件 / FileProvider 未覆盖该路径）。
+         这两种都是配置/环境问题，用户能做的只有"改用文件选择器"，所以文案指向它。 -->
+    <string name="webview_capture_failed">无法启动相机，已退回文件选择（可从相册选图片）</string>
+    <!-- 系统文件选择器的标题（Intent.createChooser 的 title）。在部分 ROM 上会显示为
+         "选择文件"对话框的标题；留空会让对话框只有一个无名标题栏，用户不知道在选什么。 -->
+    <string name="webview_file_chooser_title">选择要上传的文件</string>
+    <string name="webview_file_chooser_unavailable">本机没有可用的文件选择器，无法选择文件（请安装「文件」或「文档」类系统应用）</string>
+
+    <!-- 网页申请摄像头/麦克风的确认框。
+         关键点：本 App **没有**声明 CAMERA / RECORD_AUDIO，所以即使用户点「允许」，
+         系统在真正打开设备时仍会失败。文案必须把这件事说清楚，
+         不能承诺「允许后就能用」。 -->
+    <string name="permission_request_title">网页请求使用麦克风或摄像头</string>
+    <string name="permission_request_message">本应用没有申请麦克风/摄像头权限，即使允许，系统仍可能拒绝实际使用。一般直接拒绝即可，改用文字输入。</string>
+    <string name="permission_request_allow">仍要允许</string>
+    <string name="permission_request_deny">拒绝</string>
 </resources>

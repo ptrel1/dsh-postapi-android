@@ -6,7 +6,8 @@
     - webView：加载成功后占满，是唯一常态可见的元素；
     - loadingView：只在首次导航期间覆盖，页面开始渲染即隐藏；
     - errorView：加载失败时的替代界面（重试 / 返回登录）；
-    - logoutButton：常驻右上角的「退出登录」小按钮（v0.3.0）。
+    - logoutButton：错误页上的「退出登录」文字按钮（v0.3.0）。
+    - logoutFab / logoutMenu：右下角悬浮按钮 + 展开菜单（v0.4.0，含「检查更新」）。
       为什么用悬浮小圆点而不是右上角菜单：见 WebViewActivity.confirmLogout 的注释。
   为什么不"切换整棵子树可见性"来换页：
     切子树会销毁并重建 WebView，等于丢掉页面内所有状态（会话、滚动位置、进行中的请求）。
@@ -14,6 +15,7 @@
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/rootFrame"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -133,16 +135,220 @@
         clickable/focusable=true 是必须的 —— FrameLayout 里后声明的子 View
         会接收事件，但若不可点击，事件会穿透到下面的 WebView（造成"点到了却没反应"）。
     -->
+    <!--
+      菜单遮罩层（v0.4.0）。点击空白处收起菜单。
+
+      为什么用一层全屏透明 View 而不是"再点一次悬浮按钮"来收起：
+        悬浮按钮在 WebView 之上、菜单在它旁边，用户最自然的手势是"点别处"。
+        没有遮罩时，点空白会落到 WebView 里（可能点到网页上的按钮），
+        既没收起菜单，又误触了网页 —— 这是典型的"看似能用、其实别扭"。
+      位置上有讲究：遮罩必须声明在 webView 之后、菜单之前 ⇒ 它盖住网页、但不盖住菜单。
+      ⚠️ 默认 visibility=gone，点击事件完全不参与命中测试，不影响任何既有交互。
+    -->
+    <View
+        android:id="@+id/menuScrim"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#33000000"
+        android:clickable="true"
+        android:focusable="false"
+        android:visibility="gone" />
+
+    <!--
+      右下角折叠菜单（v0.4.0）。
+
+      ==================== 为什么是"一个按钮 + 展开菜单"====================
+      用户要求「检查更新」必须能被用户主动触发，且让我自己决定入口位置。
+      候选与取舍：
+        · 右上角：❌ 官方前端顶部有按钮，之前「退出登录」就因为重叠从右上改到右下；
+        · 新增第二个悬浮按钮：❌ 两个圆钮叠在网页上，既遮挡又容易误点；
+        · 长按某个元素：❌ 无提示、不可发现（用户根本不会长按），等于没有入口；
+        · **并入右下角那个已有的悬浮区域**：✅ 只有一个常驻控件，位置已经验证过
+          不与官方 UI 重叠，且"退出登录"与"检查更新"同属"关于本 App 的操作"，
+          放在一起符合用户对这类菜单的心智模型。
+
+      交互：点悬浮按钮 → 弹出抽屉（v0.4.11 起 4 项）→ 点遮罩或再点按钮收起。
+      为什么不用 PopupMenu：PopupMenu 的锚点与弹出方向在不同 ROM/边距下不一致，
+      之前已经在右上角吃过"位置对不上、点在网页上"的亏；用 LinearLayout 叠在
+      FrameLayout 里，位置由 layout_gravity 精确控制，只有一套真相。
+    -->
+    <!--
+      v0.4.1：右侧抽屉（替代原「上方弹出两个按钮」）。
+
+      ==================== 为什么是右侧抽屉 ====================
+      1. 空间隐喻：右手拉开的抽屉 —— iOS/Android 都建立了「侧边滑出 = 更多内容」的惯例。
+         从按钮上方弹出两个小按钮没有这个隐喻支撑，看起来像「临时的气泡」。
+      2. 容量：抽屉能放任意多项（版本号、关于、清缓存…），弹出菜单放三项以上就很挤。
+      3. 常态零遮挡：抽屉关闭时 visibility=gone，网页上只有一个 44dp 的圆钮。
+
+      宽度只占 78%（不是全屏）—— 左侧仍露出聊天内容：
+        心理学「位置连续性」：用户打开菜单后仍知道自己还在同一个页面，关闭后不用重新找位置。
+
+      底部留 24dp：避开手势导航条（系统手势区在最底部，控件压上去会误触「返回桌面」）。
+    -->
+    <LinearLayout
+        android:id="@+id/logoutMenu"
+        android:layout_width="260dp"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_vertical|end"
+        android:layout_marginTop="24dp"
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="24dp"
+        android:background="@drawable/bg_right_sheet"
+        android:elevation="12dp"
+        android:orientation="vertical"
+        android:padding="12dp"
+        android:visibility="gone"
+        tools:visibility="gone">
+
+        <!--
+          v0.4.11：原「更多」标题已删除。
+
+          为什么删：抽屉里只有 4 项（切换桌面版 / 检查更新 / 诊断模式 / 退出登录），
+          标题不提供任何信息 —— 用户能看见抽屉，不需要再被告知「这是更多」。
+          去掉后第一项直接从 padding 顶部开始，抽屉更紧凑。
+          ⚠️ 删掉后不要再为"顶部留白"另加一段空白 View：容器本身有 padding=12dp。
+        -->
+        <!--
+          切换桌面版 / 移动版（v0.4.11）。
+
+          ==================== 为什么是「改 viewport」而不是「换 UA」====================
+          DSH 前端是纯 CSS 响应式（apps/web/index.html 只有一行 viewport meta），
+          完全不看 User-Agent ⇒ 伪装成桌面 UA 既没用、又会污染服务端的分流判断。
+          真正的开关是 viewport：width=device-width（手机版）↔ width=980（桌面版）。
+          具体实现在 WebViewActivity.applyDesktopViewport / configureWebView。
+
+          ==================== 为什么放在「检查更新」之前 ====================
+          这一项是**高频、可反复用**的显示开关（用户可能一天切好几次），
+          「检查更新」是低频操作；按使用频率从上到下排更符合扫描习惯。
+
+          ⚠️ 文案由代码动态设置（switch_to_desktop / switch_to_mobile），
+             XML 里的 android:text 只是初始值，setupMenu() 会按实际状态覆盖。
+        -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/toggleDesktopButton"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:gravity="start|center_vertical"
+            android:text="@string/switch_to_desktop"
+            android:textSize="14sp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/checkUpdateButton"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:gravity="start|center_vertical"
+            android:text="@string/update_check_action"
+            android:textSize="14sp" />
+
+        <!--
+          诊断模式开关（v0.4.8）。
+
+          ==================== 为什么用 MaterialSwitch 而不是 TextButton ====================
+          用户排查的是「侧栏自动收起失效」这个 bug，开关会**长期处于开着的状态**
+          （跨多次重启、跨十几个页面加载）。TextButton 只能靠改文案表示状态，
+          用户在抽屉里点开一眼看不出「现在是开还是关」；而 CompoundButton 的
+          物理位置（拇指在左/右）+ 颜色本身就是状态，不需要二次阅读。
+          ⇒ 选 com.google.android.material.materialswitch.MaterialSwitch（Material3 组件，
+            本工程 material:1.12.0 已包含；不要换成已废弃的 SwitchMaterial）。
+
+          ==================== 与其它项对齐的三条 ====================
+          · 48dp 高度：与 checkUpdateButton / logoutMenuItem 完全一致（触摸目标 + 视觉节奏）；
+          · paddingStart/End = 12dp + textSize 14sp：与 MaterialButton(TextButton) 的内边距
+            和字号对齐 —— 否则文字会往右缩 12dp，看起来不像是同一列里的一项；
+          · gravity = start|center_vertical：文字靠左，开关在右（MaterialSwitch 自带
+            drawableEnd 的布局方式，无需额外 RelativeLayout）。
+          ⚠️ 不用 android:layout_marginEnd 去迁就开关位置：MaterialSwitch 的 thumb/track
+            是 drawable，margin 会把它挤偏，跟其它项的右边缘对不齐。
+
+          ==================== 状态由代码设置，不要写 android:checked ====================
+          默认关闭（false）由 AppPrefs.DEFAULT_SIDEBAR_DIAG 给出，并在 setupMenu() 里
+          从 SharedPreferences 读出来回填。XML 里写死 checked="true" 只会在代码读盘前
+          闪一下"已开启"，属于假状态，不要这么做。
+        -->
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/diagSwitch"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:gravity="start|center_vertical"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:text="@string/diag_mode"
+            android:textSize="14sp" />
+
+        <!--
+          诊断模式的「已开启」提示（v0.4.8）。默认 gone，开关打开时才可见。
+
+          为什么放在开关**下面**而不是塞进开关文字：开关文字一旦变长（"诊断模式（已开启）"）
+          在 48dp 高度里会折行或被截断；而这句提示本身有两行，放下面能用完整句子说明
+          "会在页面右上角显示浮层、排查完请关闭"——只说"已开启"不足以提醒用户去关。
+        -->
+        <TextView
+            android:id="@+id/diagHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingStart="12dp"
+            android:paddingTop="2dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="6dp"
+            android:text="@string/diag_mode_on_hint"
+            android:textAppearance="?attr/textAppearanceLabelSmall"
+            android:textColor="?attr/colorPrimary"
+            android:visibility="gone"
+            tools:visibility="gone" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/logoutMenuItem"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:gravity="start|center_vertical"
+            android:text="@string/logout_title"
+            android:textColor="@color/error_text"
+            android:textSize="14sp" />
+
+        <!-- 版本号：让用户能一眼看到当前版本（排查问题时尤其有用） -->
+        <TextView
+            android:id="@+id/versionFooter"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingStart="12dp"
+            android:paddingTop="16dp"
+            android:paddingEnd="12dp"
+            android:textAppearance="?attr/textAppearanceLabelSmall"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            tools:text="DSH PostAPI v0.4.0 (6)" />
+
+    </LinearLayout>
+
+    <!--
+      v0.4.1：入口按钮改为「竖排三点」图标（原为写着「菜单」的文字按钮）。
+
+      三个改动各有依据：
+        · 文字 → 图标：图标是 App 控件语言；文字按钮在 WebView 上会被当成网页元素。
+          竖排三点是全球通用的「更多操作」符号，中文界面也无需说明。
+        · 36dp → 44dp：Fitts 定律 —— 目标越小到达越慢。36dp 低于 Material 建议的
+          48dp 触摸目标，容易点不中；44dp 是在「不遮挡过多」与「够得着」之间的折中。
+        · alpha 0.75 → 0.92：半透明按钮叠在深色网页上会「融入背景」（图形-背景分离失败），
+          用户找不到入口。0.92 仍保留一点「浮于网页之上」的层次感。
+
+      点击后打开右侧抽屉（原为上方弹出两个按钮）—— 见下方 rightSheet 的说明。
+    -->
     <com.google.android.material.button.MaterialButton
         android:id="@+id/logoutFab"
         style="@style/Widget.Material3.Button.IconButton"
-        android:layout_width="36dp"
-        android:layout_height="36dp"
-        android:layout_gravity="bottom|end"
-        android:layout_margin="12dp"
-        android:alpha="0.75"
-        android:contentDescription="@string/logout_title"
-        android:text="@string/logout_short"
-        android:textSize="11sp" />
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:layout_gravity="center_vertical|end"
+        android:layout_marginEnd="6dp"
+        android:alpha="0.55"
+        android:background="@drawable/bg_fab_slim"
+        android:contentDescription="@string/app_menu_title"
+        app:icon="@drawable/ic_more_vert"
+        app:iconGravity="textStart"
+        app:iconPadding="0dp"
+        app:iconSize="20dp" />
 
 </FrameLayout>

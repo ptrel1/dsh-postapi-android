@@ -15,6 +15,10 @@
     <!-- 层级描边：比背景深一点点即可，过深会回到"传统企业软件"的观感 -->
     <color name="card_stroke">#1F000000</color>
 
+    <!-- 右下角折叠菜单的"面"：半透明白，叠在网页上时既能让菜单文字可读，
+         又能透出一点背后内容表示"这是浮层"（v0.4.0）。跟着 values-night 反转。 -->
+    <color name="scrim_menu_surface">#F2FFFFFF</color>
+
     <!-- 错误态语义色：不参与明暗主题的"降饱和"调整（安全信息必须始终醒目） -->
     <color name="error_text">#C0392B</color>
 </resources>

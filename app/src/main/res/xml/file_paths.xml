@@ -23,4 +23,19 @@
     <cache-path
         name="updates"
         path="updates/" />
+
+    <!--
+      v0.3.1：文件选择器的「拍照」路径。
+      WebViewActivity.launchCameraForImage 把 cacheDir/filechooser/capture_<毫秒>.jpg
+      以 content:// 交给系统相机写入（相机不能收 file://，minSdk 24 会抛
+      FileUriExposedException）。
+
+      ⚠️ 命名与路径必须与 WebViewActivity 的 CAPTURE_DIR_NAME = "filechooser"
+         一字不差；漏配时的现象是"点拍照没反应"——FileProvider.getUriForFile 会抛
+         IllegalArgumentException（代码里已 catch 并记 error 日志）。
+      仍然只暴露这一个子目录，理由同上（不做整个 cacheDir 的开放）。
+    -->
+    <cache-path
+        name="filechooser"
+        path="filechooser/" />
 </paths>

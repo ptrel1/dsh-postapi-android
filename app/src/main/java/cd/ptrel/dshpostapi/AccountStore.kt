@@ -43,7 +43,11 @@ import java.security.KeyStore
  * | cookieName  | 插件会话 cookie 名                    | 否   | 种进 WebView |
  * | cookieValue | 插件会话 cookie 值                    | **是** | 跳过登录页直接进 WebView |
  * | cookieExp   | cookie 过期时间戳（ms）                | 否   | 判断能否直接进 WebView |
- * | lastLogin   | 上次成功登录时间戳（ms）               | 否   | 仅排查用 |
+ * | lastLogin   | 上次成功登录时间戳（ms）               | 否   | 仅排查用 | *
+ * 清除语义分两种（v0.4.0，问题 ③ —— 改代码前必读）：
+ *   · [clearSession] 退出登录：只清 cookie，**保留 host / username / password**；
+ *   · [clearAll]     清除账号：连 host / username / password 一起清。
+ * 保留密码后如何避免"退出登录被自动重登撤销"：见 [clearSession] 的注释（EXTRA_AUTO_LOGIN）。
  *
  * 注意 [KEY_COOKIE_EXP] 是**我们自己算的保守估算**（登录时刻 + maxAgeSeconds），
  * 不是服务端给的绝对时间 —— 服务端只下发 maxAgeSeconds。宁可低估（多一次自动重登，
@@ -293,7 +297,7 @@ object AccountStore {
      * 清除**密码**（保留 host / username 以便预填），并把 cookie 一并作废。
      *
      * ===== 这是「必须先做，否则会无限重试」的那一次清除 =====
-     * 触发条件由调用方判定，只允许两种（见 LoginActivity.restoreOrAutoLogin）：
+     * 触发条件由调用方判定，只允许两种（见 LoginFlow 的边界决策表）：
      *   ① 自动重登返回 401 / 403 —— 密码已改 / 账号被禁用 / 会话被吊销；
      *   ② 用户在官网改过密码。
      * **网络错误、429、5xx 一概不清**（不是凭据问题，清了等于让用户白输一遍）。
@@ -301,6 +305,12 @@ object AccountStore {
      * cookie 一起清：既然密码都失效了，那枚 cookie 也一定是无效的。
      * 留着它会让下次启动先走"cookie 未过期 → 直接进 WebView"的错误分支，
      * 得到一片 401 页面，再来一次自动重登 —— 白白多绕一圈。
+     *
+     * ⚠️ 与 [clearSession] 的关系（容易搞混，必读）：
+     *    本方法清 **密码 + cookie**，因为服务端已经否定了这组凭据；
+     *    [clearSession] 只清 **cookie**，因为"退出登录"不代表密码错。
+     *    两者不可互换：拿 clearSession 处理 401 会导致"密码还在 → 每次都自动重登 →
+     *    每次都 401"，白白烧服务端的失败计数（5 次锁 10 分钟）。
      */
     fun clearCredentials(context: Context) {
         val current = load(context)
@@ -327,11 +337,58 @@ object AccountStore {
     }
 
     /**
-     * 「退出登录」：清空**全部**存储，回到"从未登录过"的状态。
+     * 「退出登录」：**只清会话状态**，保留账号凭据（v0.4.0，问题 ③）。
      *
-     * 与 [clearCredentials] 的区别：这里连 host / username 一起清掉。
-     * 理由：退出登录是用户明确表达的"这台手机不要留我的东西"，
-     * 保留用户名会让下一个拿这部手机的人直接看到"是谁在用"。
+     * ==================== 为什么退出登录不能清账号 ====================
+     * v0.3.0 的 performLogout 调的是 [clearAll]，把主机地址、用户名、密码一起抹了。
+     * 用户实测反馈：「退出登录之后地址用户名密码应该数据保存在本地不需要重复输入才对」。
+     * 这个反馈是对的 —— **退出登录 = 结束会话**，不是"这台手机别留我的东西"。
+     * 清账号是另一个动作（[clearAll]，放在登录页的「清除已保存的账号」）。
+     *
+     * 清的全部内容：cookieName / cookieValue / cookieExp（作废免密直进 WebView 的依据）。
+     *
+     * ==================== 密码为什么**保留**（v0.4.0 关键决策）====================
+     * 用户要求：「退出登录之后地址用户名密码应该数据保存在本地不需要重复输入才对」。
+     * 所以 host / username / **password** 全部保留，登录页三个框都填好，用户点一下即登录。
+     *
+     * 那"保留密码会不会让退出登录失效"？——不会，前提是**必须堵住自动重登的入口**：
+     *   LoginFlow 的冷启动决策里有一条"有密码 ⇒ 自动重登"。如果什么都不做，
+     *   用户点完退出、下次冷启动就会被自动登回去，看起来"退不出去"。
+     *   堵法是两条：
+     *     ① WebViewActivity.performLogout 回登录页时带 EXTRA_AUTO_LOGIN=false；
+     *     ② LoginActivity 收到 false 后只预填、不发请求（见 LoginActivity.allowAutoLogin）。
+     * ⚠️ 改这里之前先确认这两条还在 —— 它们是"保留密码"这个决定的前提。
+     *
+     * 保留：host / username / password / lastLogin（仅排查用）。
+     */
+    fun clearSession(context: Context) {
+        val current = load(context)
+        if (current == null) {
+            // 没有账号可保（存储为空 / 不可用）：无需写入。
+            // 注意这里**不要**走 clearAll —— 那会连 master key 一起重置，
+            // 下次登录又要多花 200~500ms 生成密钥。
+            return
+        }
+        // 只动三个 cookie 字段：账号三件套（host / username / password）原样写回。
+        write(
+            context,
+            current.copy(
+                cookieName = "",
+                cookieValue = "",
+                cookieExp = 0L,
+            ),
+        )
+    }
+
+    /**
+     * 「忘记账号 / 清除已保存的账号」：清空**全部**存储（含主机地址、用户名、密码）。
+     *
+     * 什么时候用（v0.4.0 起）：
+     *   · 登录页的「清除已保存的账号」链接（用户明确要把这台手机上的记录抹掉）；
+     *   · 换服务器（host 变了，旧账号的地址/用户名/密码都不再适用，见 LoginActivity）。
+     *
+     * ⚠️ **不要**再把它接到「退出登录」上：那是 v0.3.0 的设计错误，
+     *    用户实测反馈"退出后地址用户名密码被清空"。退出登录请用 [clearSession]。
      */
     fun clearAll(context: Context) {
         cached = null

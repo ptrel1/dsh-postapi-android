@@ -100,6 +100,9 @@ object UpdatePrefs {
     private const val FILE = "dsh_update_prefs"
     private const val KEY_SKIPPED_CODE = "skipped_code"
 
+    /** 上一次听服务端说的"最新 code"。见 [lastKnownLatestCode] / [reconcile]。 */
+    private const val KEY_LAST_KNOWN_LATEST = "last_known_latest_code"
+
     private fun prefs(context: Context): SharedPreferences =
         context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
@@ -118,5 +121,46 @@ object UpdatePrefs {
      */
     fun shouldPrompt(context: Context, remoteCode: Int): Boolean {
         return remoteCode > BuildConfig.VERSION_CODE && remoteCode != skippedCode(context)
+    }
+
+    /**
+     * 已经确认过的最新版本码（v0.4.0 新增）。
+     *
+     * 与 [KEY_SKIPPED_CODE] 的区别 —— 这是**两个正交的状态**，不要合并：
+     *   · skipped_code：用户点了「稍后」⇒ 这个版本别弹更新框；
+     *   · last_known_latest_code：服务端上一次告诉我们的最新 code ⇒ 用来判断
+     *     「装好了没」以及「用户主动检查时该说'已是最新'还是'发现新版本'」。
+     *
+     * 为什么需要它（问题 ②的深层根因）：
+     *   用户点「立即更新」后安装成功，但 skipped_code 可能还残留着上一次的记录；
+     *   若服务端换个 code 重新发布（版本号没变），旧的 skipped_code 就与新版无关了 ——
+     *   而 App 根本不知道自己曾经"更新到了哪个版本"，也就没法给用户
+     *   「已是最新」这个反馈。见 [reconcile]。
+     */
+    fun lastKnownLatestCode(context: Context): Int = prefs(context).getInt(KEY_LAST_KNOWN_LATEST, 0)
+
+    fun markLatestCode(context: Context, code: Int) {
+        if (code <= 0) return
+        prefs(context).edit().putInt(KEY_LAST_KNOWN_LATEST, code).apply()
+    }
+
+    /**
+     * 版本状态自洽（v0.4.0，问题 ②）。
+     *
+     * 每次**成功**读到服务端版本清单后调用一次，做两件事：
+     *   1. 记录 [KEY_LAST_KNOWN_LATEST]；
+     *   2. 若本机 code 已经 = 服务端 code（用户已经装上了最新版），
+     *      **清除 skipped_code** —— 它属于上一个还没装的版本，留着毫无意义，
+     *      而且会在下次服务端发新版时造成"明明没点过稍后，却被当成忽略过"的错觉。
+     *
+     * ⚠️ 只在本机 >= 服务端时清理：服务端比本机新（真的有待装更新）时，
+     *    skipped_code 仍然有效，用户点过的「稍后」必须被尊重。
+     */
+    fun reconcile(context: Context, remoteCode: Int) {
+        if (remoteCode <= 0) return
+        markLatestCode(context, remoteCode)
+        if (remoteCode <= BuildConfig.VERSION_CODE && skippedCode(context) != 0) {
+            prefs(context).edit().remove(KEY_SKIPPED_CODE).apply()
+        }
     }
 }

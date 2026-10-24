@@ -12,6 +12,9 @@
     <!-- 深底上的描边要用浅色叠加，用黑色叠加会"看不见" -->
     <color name="card_stroke">#1FFFFFFF</color>
 
+    <!-- 浮在网页上的菜单面：深底用"半透明深色"，与浅色侧同一个思路反向 -->
+    <color name="scrim_menu_surface">#F2101216</color>
+
     <!-- 深底上的错误色必须调亮：同一个 #C0392B 在深底上对比度不足 -->
     <color name="error_text">#F87171</color>
 </resources>

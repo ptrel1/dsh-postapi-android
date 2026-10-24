@@ -24,7 +24,15 @@ import android.webkit.CookieManager
  * | 429 限流       | 否      | 否         | 登录页 + 「稍后再试」提示（可重试，不清凭据） |
  * | 5xx / 404      | 否      | 否         | 登录页 + 提示（服务端问题，清了也没用） |
  * | 网络错误/超时  | 否      | 否         | 登录页 + 「重试」提示（可能只是断网） |
- * | 存储失效(Keystore) | 已清 | 已清     | 登录页（空） |
+ * | 存储失效(Keystore) | 已清 | 已清     | 登录页（空） | * | 同进程内已退出登录 | 否 | 否       | 登录页（host/username/密码**预填**，见下） |
+ *
+ * ==================== v0.4.0：退出登录不再清账号（问题 ③）====================
+ * 用户原话：「退出登录之后地址用户名密码应该数据保存在本地不需要重复输入才对」。
+ * 所以 [AccountStore.clearSession] 只清 cookie，保留 host / username / password；
+ * 因此密码也必须回到登录页的输入框里，否则"不用重复输入"只做到一半。
+ * 本类的启动决策用 [Decision.ShowLoginPage.prefillPassword] 区分两种语义：
+ *   · 冷启动（cookie 过期）→ 自动重登；
+ *   · 从 WebView 退出登录后重新进入 → **只预填，不自动登录**。
  *
  * **核心原则**：只有「服务端明确否定了这组凭据」（401/403）才清密码。
  * 任何"不确定"（网络、限流、服务端故障）都保留 —— 否则一次地铁隧道里的启动
@@ -64,15 +72,24 @@ object LoginFlow {
         /**
          * 停在登录页。[host] / [username] 用于预填。
          *
-         * [password] 非空 = 「存储里有密码，界面层应当立刻发起自动重登」
-         * （只在`performAutoLogin` 的`ignoreAutoLogin`=false 时返回）。
-         * 从 WebView 返回本页时用`ignoreAutoLogin`=true 取到的是 password="",
-         * 因为那时用户已经主动退出会话，再自动登回去是反直觉的。
+         * [password] 有两种语义，由 [prefillPassword] 区分（v0.4.0）：
+         *   · [prefillPassword] = false：**存储里有密码，界面层应当立刻发起自动重登**
+         *     （冷启动的正常路径）；
+         *   · [prefillPassword] = true：**只把密码填进输入框，不要自动登录**
+         *     （用户刚点了「退出登录」，或从 WebView 返回本页）。
          */
         data class ShowLoginPage(
             val host: String,
             val username: String,
             val password: String,
+            /**
+             * true = [password] 只用于**预填输入框**，界面层不得自动发起登录。
+             *
+             * 为什么必须有这个开关：`password.isNotEmpty()` 一个判据无法区分
+             * "冷启动自动重登"与"用户刚退出登录、希望我帮他填好"—— 两者都需要密码，
+             * 但一个要发请求、一个绝对不能发。
+             */
+            val prefillPassword: Boolean = false,
         ) : Decision()
 
         /**
@@ -106,7 +123,7 @@ object LoginFlow {
                     // 存储层已被 AccountStore 全兜住，走到这里只可能是 OOM 之类的意外。
                     // 兜成"显示空登录页"：用户还能用 App，只是不记忆。
                     Log.w(TAG, "start decision failed (" + e.javaClass.simpleName + ")")
-                    Decision.ShowLoginPage(defaultHost(context), "", "")
+                    Decision.ShowLoginPage(defaultHost(context), "", "", prefillPassword = false)
                 }
             mainHandler.post { onDecision(decision) }
         }
@@ -116,7 +133,7 @@ object LoginFlow {
     private fun computeStartDecision(context: Context, ignoreAutoLogin: Boolean): Decision {
         val account = AccountStore.load(context) ?: run {
             val fallback = LoginDefaults.lastHost(context) ?: defaultHost(context)
-            return Decision.ShowLoginPage(fallback, "", "")
+            return Decision.ShowLoginPage(fallback, "", "", prefillPassword = false)
         }
 
         // ---- 分支 1：cookie 还在有效期内 → 直接进 WebView ----
@@ -134,21 +151,29 @@ object LoginFlow {
             AccountStore.clearCookie(context)
         }
 
-        // ---- 分支 2：没有密码可重登 → 登录页（预填 host/username）----
+        // ---- 分支 2：没有密码 → 登录页（预填 host/username）----
         if (account.password.isEmpty()) {
-            return Decision.ShowLoginPage(account.host, account.username, "")
+            return Decision.ShowLoginPage(account.host, account.username, "", prefillPassword = false)
         }
 
         // ---- 分支 3：有密码 ----
-        // [ignoreAutoLogin] = true（从 WebView 返回本页）：**不**自动重登。
+        // [ignoreAutoLogin] = true（同进程内退出登录后重新进入 / 从 WebView 返回本页）：
+        // **不**自动重登，但把密码**预填**给界面层。
         // 为什么：用户刚点了「返回登录」/「退出登录」，此时自动把他登回去是反直觉的，
-        // 而且会重复烧服务端的失败计数。密码仍在存储里，用户手动登录即可。
+        // 而且会重复烧服务端的失败计数。
+        // v0.4.0（问题 ③）：预填密码是用户明确的要求 ——「退出登录之后地址用户名密码
+        // 应该数据保存在本地不需要重复输入才对」。用户点一下「登录」即可。
         if (ignoreAutoLogin) {
-            return Decision.ShowLoginPage(account.host, account.username, "")
+            return Decision.ShowLoginPage(
+                account.host,
+                account.username,
+                account.password,
+                prefillPassword = true,
+            )
         }
         // 注意：这里**不发网络请求**（本函数跑在 IO 线程，但发请求需要 Activity
         // 判断是否已销毁，并且失败时要更新 UI）。只把"可以自动重登"告诉界面层。
-        return Decision.ShowLoginPage(account.host, account.username, account.password)
+        return Decision.ShowLoginPage(account.host, account.username, account.password, prefillPassword = false)
     }
 
     /**

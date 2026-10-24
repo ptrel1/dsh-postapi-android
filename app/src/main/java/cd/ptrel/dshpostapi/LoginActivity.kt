@@ -7,7 +7,9 @@ import android.text.TextWatcher
 import android.util.Log
 import android.view.View
 import android.view.inputmethod.EditorInfo
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import cd.ptrel.dshpostapi.databinding.ActivityLoginBinding
 
 /**
@@ -21,7 +23,8 @@ import cd.ptrel.dshpostapi.databinding.ActivityLoginBinding
  * ==================== v0.3.0：账号本地记忆 ====================
  * 本页现在是**两个入口**：
  *   ① 冷启动：先问 [LoginFlow.decideOnStart]，可能直接跳过本页进 WebView；
- *   ② 从 WebView「返回登录/退出登录」回来：预填上次的 host + username，密码留空。
+ *   ② 从 WebView「返回登录/退出登录」回来：预填上次的 host + username + password
+ *      （v0.4.0 问题 ③：密码也填，但**不**自动登录 —— 见 [EXTRA_AUTO_LOGIN]）
  *
  * 决策逻辑全在 [LoginFlow]（那里有完整的边界表），本页只负责**呈现**。
  *
@@ -36,14 +39,32 @@ import cd.ptrel.dshpostapi.databinding.ActivityLoginBinding
  */
 class LoginActivity : AppCompatActivity() {
 
-    private companion object {
-        const val TAG = "LoginActivity"
+    companion object {
+        private const val TAG = "LoginActivity"
+
+        /**
+         * 「进来之后要不要用保存的账号自动登录」（v0.4.0，问题 ③）。
+         *
+         * 默认 true（冷启动的正常行为）。WebViewActivity 的「退出登录」显式传 false：
+         * 用户刚点了退出，登录页只负责把地址/用户名/密码**预填**好，绝不自动登回去。
+         *
+         * 为什么用 Intent 参数而不是"同进程"判断：退出登录是 startActivity 一个新实例，
+         * 新旧实例并存，任何进程级标志都难以区分"用户主动退出"与"被系统重建"。
+         */
+        const val EXTRA_AUTO_LOGIN = "cd.ptrel.dshpostapi.EXTRA_AUTO_LOGIN"
     }
 
     private lateinit var binding: ActivityLoginBinding
 
     /** 是否已按 [LoginFlow.Decision] 完成过预填。避免 onResume 反复覆盖用户正在输入的内容。 */
     private var prefillDone = false
+
+    /**
+     * 本次进来是否允许用保存的账号自动登录（见 [EXTRA_AUTO_LOGIN]）。
+     *
+     * false = 从 WebView「退出登录」回来：只预填，不发任何登录请求。
+     */
+    private var allowAutoLogin = true
 
     /**
      * 自动重登用到的凭据。
@@ -75,6 +96,11 @@ class LoginActivity : AppCompatActivity() {
         }
         // 「重新登录」：自动重登失败后的重试入口（网络 / 429 场景）。
         binding.retryAutoLoginButton.setOnClickListener { retryAutoLogin() }
+        // ===== 「清除已保存的账号」（v0.4.0，问题 ③）=====
+        // 退出登录只清会话（保留账号供预填），"彻底清掉这台手机上的记录"必须另有入口，
+        // 否则用户想换人用/卖手机时没有可用的动作。这里放一个**次要链接**：
+        // 低频、不可逆、且会让用户重敲三样东西，不该做成与「登录」同等重量的按钮。
+        binding.clearAccountLink.setOnClickListener { confirmClearAccount() }
 
         // 地址被用户改动 ⇒ 视为换服务器，清掉旧账号的密码与 cookie。
         // 只监听 hostInput，且只在"已有账号且新地址与旧地址不同"时动手（见 onHostEdited）。
@@ -96,6 +122,9 @@ class LoginActivity : AppCompatActivity() {
         //     · 冷启动：第一次进 → 做决策（含自动重登）；
         //     · 退出登录后重进：同一进程，标志已是 true → 只预填，不自动重登。
         //   两个 Activity 实例并存（栈里保留旧实例）时也共享这个标志，不会打架。
+        // v0.4.0（问题 ③）：退出登录会带 EXTRA_AUTO_LOGIN=false —— 那就把密码填好，
+        // 但**不**自动登录。冷启动（默认 true）行为不变。
+        allowAutoLogin = intent?.getBooleanExtra(EXTRA_AUTO_LOGIN, true) ?: true
         if (!LoginFlow.isStartDecisionDone()) {
             startDecision()
         } else {
@@ -123,8 +152,13 @@ class LoginActivity : AppCompatActivity() {
                 }
                 is LoginFlow.Decision.ShowLoginPage -> {
                     applyPrefill(decision.host, decision.username)
-                    if (decision.password.isNotEmpty()) {
-                        // 有密码 ⇒ 发起自动重登（用户看不到登录页，除非失败）。
+                    if (decision.password.isNotEmpty() && (decision.prefillPassword || !allowAutoLogin)) {
+                        // v0.4.0（问题 ③）：用户刚「退出登录」，只是希望不用重敲 ——
+                        // 填好但不发请求。"退出登录"必须真的退出，不能被自动重登撤销。
+                        binding.passwordInput.setText(decision.password)
+                        Log.i(TAG, "prefilled saved password, not auto-logging in")
+                    } else if (decision.password.isNotEmpty()) {
+                        // 有密码且要求自动重登 ⇒ 发起自动重登（用户看不到登录页，除非失败）。
                         pendingAutoLoginUsername = decision.username
                         pendingAutoLoginPassword = decision.password
                         pendingAutoLoginHost = ApiClient.parseHost(decision.host)
@@ -144,13 +178,23 @@ class LoginActivity : AppCompatActivity() {
     /**
      * 非冷启动（例如「退出登录」后重新进入本页）：只预填，不做任何网络请求。
      *
-     * 读的是存储里的 host / username；退出登录会清空它们，此时回退到
-     * [LoginDefaults] 里"上次用过的地址"（那个库刻意不被退出登录清除）。
+     * v0.4.0（问题 ③）：退出登录改成 [AccountStore.clearSession] 之后，存储里的
+     * host / username / **password** 都还在（clearSession 只清 cookie）。
+     * 所以这里要把三个框都填好 —— 用户要求「退出登录之后地址用户名密码
+     * 应该数据保存在本地不需要重复输入」。密码只填**不发请求**：
+     * 自动登录由 [allowAutoLogin] 单独控制。
+     *
+     * 若存储里什么都没有（例如 Keystore 失效导致整库被清），回退到
+     * [LoginDefaults] 里"上次用过的地址"（那个库刻意不被清除）。
      */
     private fun prefillFromStore() {
         val account = LoginFlow.peek(this)
         if (account != null) {
             applyPrefill(account.host, account.username)
+            // 密码也预填（用户点「登录」即可）；不在这里发请求 —— 本方法只做预填。
+            if (account.password.isNotEmpty()) {
+                binding.passwordInput.setText(account.password)
+            }
         } else {
             val last = LoginDefaults.lastHost(this)
             if (last != null) applyPrefill(last, "")
@@ -294,7 +338,7 @@ class LoginActivity : AppCompatActivity() {
      * 凭据在进程里流动的路径越短越好。
      */
     private fun openWebViewWithLaunchUrl(launchUrl: String, hostBaseUrl: String) {
-        Updates.checkQuietly(this)
+        Updates.checkAfterLogin(this)
         val intent = Intent(this, WebViewActivity::class.java).apply {
             putExtra(WebViewActivity.EXTRA_LAUNCH_URL, launchUrl)
             putExtra(WebViewActivity.EXTRA_HOST, hostBaseUrl)
@@ -392,8 +436,9 @@ class LoginActivity : AppCompatActivity() {
             // 从 WebView 回来：密码框清掉（手机上最常见的事故是"人离开屏幕后密码还在框里"）。
             binding.passwordInput.text?.clear()
             setBusy(false)
-            // 重填 host / username（WebView 里可能刚退出登录，此时存储是空的，
-            // 于是回退到 LoginDefaults 里"上次用过的地址"——那个库刻意不被退出登录清除，
+            // 重填 host / username（WebView 里可能刚退出登录：v0.4.0 起 clearSession
+            // 保留 host / username，所以这里能正常预填；若整库失效则回退到
+            // LoginDefaults 里"上次用过的地址"——那个库刻意不被清除，
             // 否则用户每次退出都要重新回忆域名）。
             val account = LoginFlow.peek(this)
             if (account != null) {
@@ -423,6 +468,51 @@ class LoginActivity : AppCompatActivity() {
         } finally {
             suppressHostWatcher = false
         }
+    }
+
+    /**
+     * 「清除已保存的账号」确认（v0.4.0）。
+     *
+     * 为什么必须二次确认：它清的是 host + username + password + cookie，
+     * 而且**没有撤销**。与「退出登录」的区别要在文案里说清（见 strings.xml），
+     * 否则用户会以为两个按钮等价，误点后重敲三样东西。
+     */
+    private fun confirmClearAccount() {
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.clear_account_title)
+            .setMessage(R.string.clear_account_message)
+            .setNegativeButton(R.string.logout_action_cancel, null)
+            .setPositiveButton(R.string.clear_account_action) { _, _ -> performClearAccount() }
+            .show()
+    }
+
+    /**
+     * 真正清除账号：加密存储整份清（含 Keystore 之外的字段）+ 输入框清空 + 内存副本清空。
+     *
+     * 在后台线程写：AES + commit 是阻塞 IO，而这个动作对用户是"点一下就没"的，
+     * 不该让他看到主线程卡顿。清完之后把输入框恢复成"首次安装"的样子。
+     */
+    private fun performClearAccount() {
+        // 内存里可能还留着自动重登用的那份（用户点了清除，必须立刻作废）。
+        clearPendingCredentials()
+        val appContext = applicationContext
+        Thread({
+            AccountStore.clearAll(appContext)
+        }, "dsh-clear-account").apply { isDaemon = true }.start()
+
+        suppressHostWatcher = true
+        try {
+            binding.hostInput.setText(getString(R.string.default_host))
+            binding.usernameInput.setText("")
+            binding.passwordInput.setText("")
+        } finally {
+            suppressHostWatcher = false
+        }
+        binding.errorText.visibility = View.GONE
+        binding.autoLoginHint.visibility = View.GONE
+        binding.retryAutoLoginButton.visibility = View.GONE
+        Toast.makeText(this, R.string.clear_account_done, Toast.LENGTH_SHORT).show()
+        Log.i(TAG, "saved account cleared")
     }
 
     /** 校验输入并发起登录。所有提前 return 的分支都在这里给出可见反馈，不留"点了没反应"。 */
@@ -520,10 +610,13 @@ class LoginActivity : AppCompatActivity() {
     private fun openWebView(result: LoginResult, hostBaseUrl: String) {
         // ===== 检查更新 =====
         // 时机：登录成功之后、跳 WebView 之前。它是**唯一保证有 cookie 的位置**。
+        // v0.4.4：改调 checkAfterLogin —— 它会先把本进程的自动检查名额清空再查。
+        // 原因见 Updates.checkAfterLogin 的注释（冷启动 401 会顺手清 cookie，
+        // 可能与这次写入交错，只有"登录成功这一刻"能确认 cookie 真的有效）。
         // v0.3.0 起会话上下文由 Updates 从 AccountStore 现读（上面刚异步写入，
         // 多数情况下已就绪；若还没写完，本次检查会静默跳过 —— 由 WebView
         // 首次 onPageFinished 的那次补上）。
-        Updates.checkQuietly(this)
+        Updates.checkAfterLogin(this)
 
         val intent = Intent(this, WebViewActivity::class.java).apply {
             putExtra(WebViewActivity.EXTRA_LAUNCH_URL, result.launchUrl)

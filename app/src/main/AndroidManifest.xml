@@ -62,11 +62,63 @@
             </intent-filter>
         </activity>
 
+        <!--
+          WebViewActivity 用 adjustNothing（v0.4.5）—— 键盘让位完全由 App 自己用
+          translationY 完成（见 WindowInsetsHelper.applySystemBarPadding 的 translateForIme）。
+
+          ============ 版本演进（别只看最后一行，要看为什么前几版不够）============
+          v0.4.1  adjustResize + 无 ime padding：
+                  系统缩短窗口 ⇒ WebView 高度随键盘变化 ⇒ 100vh 变化 ⇒ 每敲一个字重排。
+          v0.4.2  adjustNothing + WindowInsetsHelper 给根容器加 ime padding：
+                  窗口不缩，但根容器 padding 变化仍会**重算子 View 布局**，
+                  WebView 高度同样跟着（有效区域）变化；用户实测**仍卡**。
+          v0.4.3  adjustPan + **不加** ime padding：
+                  以为系统会把整窗平移。**实测完全没动、输入框被键盘盖住。**
+                  根因：WindowInsetsHelper 调用了 setDecorFitsSystemWindows(false)，
+                  等于声明「insets 我自己管」；此时 adjustPan（要求系统平移窗口）
+                  语义矛盾 —— 系统两边都不做。⇒ adjustPan 在这个 App 里永远无效。
+          v0.4.5  adjustNothing + 自己设 rootFrame.translationY = -ime.bottom：
+                  只改绘制位置，布局尺寸不变 ⇒ WebView 尺寸 / 100vh 恒定 ⇒ 零重排；
+                  同时页面确实上移，输入框从键盘底下露出来。
+                  对照实验支持这个方向：同一台机器上 Edge 浏览器打字不卡、App WebView 卡
+                  （华为 VDE-AL10 / Android 16 / WebView Chrome 114）⇒ 问题在 App 侧。
+
+          为什么是 adjustNothing 而不是 adjustResize/adjustPan：
+            既然系统能力已被 setDecorFitsSystemWindows(false) 关掉，写哪个都一样；
+            adjustNothing 语义最诚实 —— 「系统别动，我自己来」，也不会在别的 ROM 上
+            意外触发系统 resize 造成双重让位。
+
+          代价（已知并接受）：键盘弹出时页面整体上移，顶部内容（会话标题）被推出可视区。
+            打字时不需要看标题，可接受；收起键盘后 ime.bottom = 0 ⇒ translationY 归零即恢复。
+
+          ⚠️ v0.4.5 起的三方成对关系（改一处必须同步另外两处）：
+             · 本处 adjustNothing
+             · WebViewActivity：applySystemBarPadding(handleIme = false, translateForIme = true)
+             · WindowInsetsHelper 的 listener 内 view.translationY = -ime.bottom
+             只改一处 ⇒ 键盘盖住输入框（系统与 App 都不动）或键盘高度让两遍（悬空）。
+
+           ============ v0.4.11：这条 adjustNothing **只在 API 30+ 真正生效** ============
+           为什么：v0.4.10 在 Android 10（华为 VRD-AL10 / EMUI）上三种让位方式全部无效，
+           根因是 WindowInsetsHelper 无条件调用 setDecorFitsSystemWindows(false) ——
+           该标志在 API 29- 上关掉了系统避让，却并不保证把 ime inset 交给我们，
+           结果两头落空。详见 WindowInsetsHelper 文件头「为什么必须按 API 分级」。
+
+           现在的分工：
+             · API 30+：运行时把 softInputMode 设为 adjustNothing
+                        （见 WebViewActivity.onCreate 的 applySoftInputModeForApiLevel）；
+                        XML 里这条 static 值在 API 30+ 上就是本行的值，两处一致。
+             · API 29-：运行时改回 adjustResize，并且不接管 insets。
+                        系统自行缩短窗口来避让键盘，状态栏由 fitsSystemWindows 语义让开。
+
+           ⚠️ 为什么不拆成两套 manifest / 两个 Activity 类：那会把"同一份代码两条路径"
+              变成"两份代码"，任何一处键盘修复都要改两遍，且极易只改一边。
+              运行时按 SDK_INT 改一个字段，是成本最低、最不容易漂移的做法。
+        -->
         <activity
             android:name=".WebViewActivity"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
             android:exported="false"
-            android:windowSoftInputMode="adjustResize" />
+            android:windowSoftInputMode="adjustNothing" />
 
         <!--
           FileProvider：「检查更新」下载完 APK 后，把它以 content:// 交给系统安装器。

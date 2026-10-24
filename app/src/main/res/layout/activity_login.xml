@@ -163,6 +163,27 @@
                 android:text="@string/action_login"
                 android:textSize="16sp" />
 
+            <!--
+              「清除已保存的账号」（v0.4.0，问题 ③）。
+
+              为什么需要它：退出登录只清会话、保留地址/用户名/密码（用户要求"不用重复输入"），
+              于是"把这台手机上的记录彻底抹掉"就没有入口了。这里放一个次要链接，
+              居中、小字号、灰色，与主按钮拉开层级 —— 它是低频且不可逆的动作。
+            -->
+            <TextView
+                android:id="@+id/clearAccountLink"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginTop="16dp"
+                android:background="?attr/selectableItemBackground"
+                android:clickable="true"
+                android:focusable="true"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="8dp"
+                android:text="@string/clear_account_link"
+                android:textColor="@color/label_secondary"
+                android:textSize="12sp" />
             <com.google.android.material.progressindicator.CircularProgressIndicator
                 android:id="@+id/loginProgress"
                 android:layout_width="wrap_content"
