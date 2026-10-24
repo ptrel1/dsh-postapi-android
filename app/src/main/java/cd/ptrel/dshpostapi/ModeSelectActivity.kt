@@ -56,17 +56,30 @@ class ModeSelectActivity : AppCompatActivity() {
      *   取 UA 是一次性字符串操作，代价可忽略；取不到就当作"不知道"，不显示提示。
      */
     private fun maybeShowOldWebViewHint() {
+        // ⚠️ 必须用 Throwable 而不是 Exception：
+        //    WebView provider 不可用时可能抛 Error（UnsatisfiedLinkError 等），
+        //    catch (e: Exception) 接不住，会直接崩到桌面。
+        //
+        // ⚠️ 这个检测纯粹是「锦上添花」—— 检测失败只是少一行提示，
+        //    绝不能让它把选择页带崩。所以范围放到最大、且立刻销毁临时 WebView。
+        var probe: WebView? = null
         try {
-            val ua = WebView(this).settings.userAgentString ?: return
-            val m = Regex("Chrome/([0-9]+)").find(ua) ?: return
-            val major = m.groupValues[1].toIntOrNull() ?: return
-            Log.i(TAG, "webview chrome major=" + major)
-            if (major < OLD_WEBVIEW_MAJOR) {
-                findViewById<View>(R.id.compatHint).visibility = View.VISIBLE
+            probe = WebView(applicationContext)
+            val ua = probe.settings.userAgentString
+            if (ua != null) {
+                val m = Regex("Chrome/([0-9]+)").find(ua)
+                val major = m?.groupValues?.getOrNull(1)?.toIntOrNull()
+                if (major != null) {
+                    Log.i(TAG, "webview chrome major=" + major)
+                    if (major < OLD_WEBVIEW_MAJOR) {
+                        findViewById<View>(R.id.compatHint).visibility = View.VISIBLE
+                    }
+                }
             }
-        } catch (e: Exception) {
-            // 取不到 UA 不影响选择本身，静默即可（不显示提示 ≠ 功能不可用）
-            Log.w(TAG, "detect webview version failed: " + e.javaClass.simpleName)
+        } catch (t: Throwable) {
+            Log.w(TAG, "detect webview version failed: " + t.javaClass.simpleName)
+        } finally {
+            try { probe?.destroy() } catch (t: Throwable) { /* 销毁失败无所谓 */ }
         }
     }
 

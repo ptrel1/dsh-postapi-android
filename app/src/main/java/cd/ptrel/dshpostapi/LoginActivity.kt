@@ -234,7 +234,7 @@ class LoginActivity : AppCompatActivity() {
      *   目标界面（WebViewActivity）是被动容器，它不该知道"还有另一种模式"这回事；
      *   分发是登录页的职责，且这里已经有全部上下文（launchUrl / host / cookie）。
      */
-    private fun routeToConfiguredMode(launchUrl: String, hostBaseUrl: String) {
+    private fun routeToConfiguredMode(launchUrl: String, hostBaseUrl: String, finishSelf: Boolean = true) {
         when (AppPrefs.getUiMode(this)) {
             null -> {
                 // 从没选过：先选。**不传 launchUrl** —— 这枚 token 是一次性的，
@@ -248,7 +248,10 @@ class LoginActivity : AppCompatActivity() {
             AppPrefs.UI_MODE_COMPAT -> enterConfiguredMode(CompatActivity::class.java, launchUrl, hostBaseUrl)
             else -> enterConfiguredMode(WebViewActivity::class.java, launchUrl, hostBaseUrl)
         }
-        finish()
+        // 登录成功这条路径**不** finish：用户从 WebView 返回时应当能回到登录页重试
+        // （v0.3.0 起的既有行为，见调用处注释）。
+        // 冷启动 resume / 自动重登这两条路径要 finish —— 登录页已经没有意义了。
+        if (finishSelf) finish()
     }
 
     /**
@@ -286,8 +289,10 @@ class LoginActivity : AppCompatActivity() {
         // 内存上下文里，UpdateSession 从 AccountStore 读（那里存着登录时那份），
         // 所以这里不需要额外做什么。若存储里没有 cookie（例如上一版残留），
         // Updates.checkQuietly 会静默返回，不会误报。
-        enterConfiguredMode(WebViewActivity::class.java, url)
-        finish()
+        // v0.5.0：必须走模式分发 —— 硬编码 WebViewActivity 会让选了兼容模式的用户
+        // 每次冷启动都被踢回完整模式（cookie 有效路径是最高频的入口）。
+        // hostBaseUrl 传空：WebViewActivity 有 AccountStore 兜底（initHostBaseUrl）。
+        routeToConfiguredMode(url, "")
     }
 
     // ==========================================================================
@@ -687,7 +692,7 @@ class LoginActivity : AppCompatActivity() {
             // 插件 cookie 缺失表现为"页面能开、插件功能 401"，用户可点重新登录。
             android.util.Log.w("LoginActivity", "seed cookie failed (" + e.javaClass.simpleName + ")")
         }
-        routeToConfiguredMode(result.launchUrl, hostBaseUrl)
+        routeToConfiguredMode(result.launchUrl, hostBaseUrl, finishSelf = false)
         // 不在登录页 finish()：用户从 WebView 返回时应当能回到这里重试。
         // v0.3.0 保留此行为 —— 「退出登录」在 WebView 里，回来后本页会重填账号。
     }
