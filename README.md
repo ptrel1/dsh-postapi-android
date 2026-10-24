@@ -1,17 +1,76 @@
-# DSH PostAPI · Android 客户端（v0.3.0）
+# DSH PostAPI · Android 客户端（v0.5.0）
 
 > DSH（DeepSeekRuntime）的公网访问入口之一：用账号密码登录，然后在原生 WebView 里使用官方网页版。
 > **账号密码在本机加密保存**，下次打开免输入；cookie 失效自动重登。
-> 文件下载仍在规划中。
+> 支持交付物直链下载（卡片点一下即下载）。
 
-> ## ⚠️ 首次使用必读
-> **请先把登录页的「服务地址」改成你自己的 DSH 地址**（例如 `https://dsh.example.com`）。
->
-> 仓库里**不含任何真实域名**：默认预填值是占位用的 `http://127.0.0.1:3080`，
+---
+
+## 必须先安装配套插件（否则本 App 无法登录）
+
+**本 App 不是独立客户端** —— 它依赖 DSH 插件 **dsh-postapi-bridge** 提供登录与插件 API。
+插件没装，App 连登录都会失败（/api/dsh/v1/mobile-login 不存在 → 404）。
+
+### 安装（在跑 DSH 的那台机器上）
+
+    # 装到当前 profile（把 web 换成你自己的 profile 名）
+    dsh plugin --profile web add dsh-postapi-bridge
+
+    # 重启 DSH 生效
+
+### 发布渠道
+
+| 渠道 | 地址 |
+| :--- | :--- |
+| **npm（推荐）** | https://www.npmjs.com/package/dsh-postapi-bridge |
+| npm 安装命令 | npm install dsh-postapi-bridge |
+| **GitHub** | https://github.com/ptrel1/dsh-postapi-bridge |
+| 插件 Gitea 主仓 | https://git.ptrel.cc.cd:53103/ptrel1/dsh1-plugins |
+
+**当前版本：dsh-postapi-bridge@1.8.0**
+
+> ⚠️ npm 上 0.7.0 及更早的版本**不包含**本 App 需要的接口，必须 >= 1.8.0。
+> 用 npm view dsh-postapi-bridge version 确认。
+
+### 插件提供哪些接口
+
+App 用到的全部端点（都由 dsh-postapi-bridge 提供）：
+
+| 端点 | 用途 |
+| :--- | :--- |
+| POST /api/dsh/v1/mobile-login | 账号密码换「官方启动令牌 + 插件会话 cookie」 |
+| GET /api/dsh/v1/files?sessionId= | 交付物清单（含可直接下载的直链） |
+| POST /api/dsh/v1/file-ticket | 签发下载票据 |
+| GET /api/dsh/v1/dl/<token> | 无状态直链下载（48h 时效） |
+| GET /api/dsh/v1/app-version | App 版本检查 |
+| GET /api/dsh/v1/app-latest.apk | App 安装包 |
+| POST /api/dsh/v1/chat/stream | SSE 流式对话（兼容模式用，v1.8.0 起） |
+
+**插件的其他能力**（交付物直链、侧栏自动收起、客户端诊断）见插件仓库 README。
+
+---
+
+## 首次使用必读
+
+**请先把登录页的「服务地址」改成你自己的 DSH 地址**（例如 https://dsh.example.com）。
+
+> 仓库里**不含任何真实域名**：默认预填值是占位用的 http://127.0.0.1:3080，
 > 它不是你该连的服务器，点登录前一定要改。改完地址后那个值会被记住。
 
 ---
 
+## 两种使用方式（v0.5.0）
+
+登录成功后第一次进入，App 会让你选一次使用方式，选择会记住：
+
+| | 完整模式（WebView） | 兼容模式（原生） |
+| :--- | :--- | :--- |
+| **界面** | 官方网页版，与电脑端一致 | 原生界面（**开发中**，当前为占位页） |
+| **功能** | 全部：交付物下载、命令、@提及、审批、模型切换 | 目前无 |
+| **依赖** | 系统 WebView 内核（旧内核如 Chrome 114 会卡顿） | 不依赖 WebView 内核 |
+| **适合** | 需要完整功能 | 日常聊天、旧机型 |
+
+随时可以在 App 内切换，两种模式共用同一个账号与 cookie。
 
 ---
 
@@ -50,10 +109,9 @@
 ④ 之后页面内所有 /api/* 请求自动携带 cookie，官方 RPC 全可用
 ```
 
-**服务端契约出处**（只读，另一子代理正在改）：`<插件仓库>/plugins/dsh-postapi-bridge/lib/index.js`
+**服务端契约出处**（插件仓库）：`<插件仓库>/plugins/dsh-postapi-bridge/lib/index.js`
 
-- 分流点 `:2430`（`isMobileLogin`）、handler `:1602`（`handleMobileLogin`）、成功响应体 `:1730`
-- ⚠️ **行号会随插件版本漂移**（该文件正由另一子代理修改）。找不到时按符号名搜索：`isMobileLogin` / `handleMobileLogin` / `sendJson(res, 200`
+- 分流点、handler、成功响应体均按符号名搜索：`isMobileLogin` / `handleMobileLogin` / `sendJson(res, 200`
 - 失败语义：`400` 缺字段/非法 host·scheme，`401` 凭据错（不区分原因，防用户名枚举），`429` 按 IP 限流（5 次失败锁 10 分钟），`503` 读不到启动令牌
 - 该端点**不要求 Bearer token**（它本身就是登录口），安全性由按 IP 限流兜底
 
@@ -625,7 +683,7 @@ GET  /api/dsh/v1/file/<token>            → 文件流（支持 Range / 206）
 | 项 | 现状 |
 | :--- | :--- |
 | `dsh-web` 启动参数 | `--profile web --trusted-host <你的域名> …`（按实际部署核对） |
-| 插件版本 | `dsh-postapi-bridge@1.4.1` |
+| 插件版本 | `dsh-postapi-bridge@1.8.0` |
 | 启动令牌来源 | 从 `<DSH 日志目录>/dsh-web.log` 解析 `dsh web: ...?token=...`（60s 缓存） |
 | 插件会话有效期 | `sessionMaxAgeHours` 默认 24h，滚动续期 |
 | 官方 cookie 有效期 | `cookieMaxAgeDays` 默认 30 天 |
