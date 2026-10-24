@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  右侧细按钮背景（v0.4.2）。
+
+  为什么不用 Material 的 Filled.Tonal：那个样式自带较重的底色，
+  叠在网页上像"一块补丁"。这里要的是"一根细把手"——
+  视觉上几乎消失，但手指能点中。
+
+  交互区与视觉区分离：
+    · 视觉：40dp 宽、透明度 0.55，深色半透明圆角
+    · 触摸：由 MaterialButton 的 40dp 保证（≥ 最小的 48dp 建议略低，
+      但它是贴边的细条，误触成本低，且不遮挡内容更重要）
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#33000000" />
+    <corners
+        android:topLeftRadius="20dp"
+        android:bottomLeftRadius="20dp" />
+</shape>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  右下角折叠菜单的背景（v0.4.0）。
+
+  为什么不复用 bg_card：卡片是"页面上的一块内容"，用实心背景 + 发丝描边；
+  这里是一个**浮在网页内容之上**的菜单，需要与背后的网页拉开层次 ——
+  网页可能是任意颜色（浅色主题/深色聊天界面/图片），所以这里用半透明面 +
+  更圆的圆角（14dp，介于按钮 10 与卡片 16 之间），并靠在布局里给 elevation=6dp。
+  颜色同样取自主题属性，暗色模式自动跟随，不需要 values-night 副本。
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/scrim_menu_surface" />
+    <corners android:radius="14dp" />
+</shape>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  右侧抽屉背景：左侧圆角 + 轻微阴影。
+
+  为什么只要左侧圆角：抽屉贴着屏幕右边缘，右侧圆角会被屏幕边框裁掉，画了也看不见，
+  还会在圆角处露出网页内容（一条缝）。
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="?attr/colorSurface" />
+    <corners
+        android:topLeftRadius="16dp"
+        android:bottomLeftRadius="16dp" />
+</shape>
