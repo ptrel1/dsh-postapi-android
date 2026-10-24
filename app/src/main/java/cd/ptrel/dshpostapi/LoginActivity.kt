@@ -260,11 +260,25 @@ class LoginActivity : AppCompatActivity() {
      * launchUrl 为空时用 EXTRA_RESUME_MODE（复用 CookieManager 已有 cookie），
      * 否则把 launchUrl 交出去让目标界面做那一次导航（官方 BrowserAuth 只在那一次请求上铸 cookie）。
      */
+    /**
+     * 进某个具体界面（两种模式共用）。
+     *
+     * ⚠️ **必须同时设 EXTRA_RESUME_MODE = true**，即使带了 launchUrl。
+     *   原因：WebViewActivity.onCreate 里有一条护栏 ——
+     *     if (!resumeMode && (cookieName.isEmpty() || cookieValue.isEmpty())) { finish(); return }
+     *   它防的是「非 resume 却没有 cookie 三件套」这种参数不全的调用。
+     *   而 v0.5.0 起 cookie 已经由调用方先种进 CookieManager（见 openWebView），
+     *   Intent 里不再传三件套 ⇒ 不设 resumeMode 就会被这条护栏判定为参数不全、立刻 finish。
+     *   （v0.5.1~0.5.4 实测就是这个 bug：完整模式登录后页面一闪就退回登录页；
+     *    而从兼容模式切完整模式却能进 —— 因为那条路径设了 resumeMode。）
+     *
+     * launchUrl 仍要传：官方 BrowserAuth 只在「GET /?token=」那一次请求上铸官方 cookie，
+     * resume 语义只表示"不用再种插件 cookie"，不是"不用导航"。
+     */
     private fun enterConfiguredMode(target: Class<*>, launchUrl: String, hostBaseUrl: String? = null) {
         val intent = Intent(this, target)
-        if (launchUrl.isEmpty()) {
-            intent.putExtra(WebViewActivity.EXTRA_RESUME_MODE, true)
-        } else {
+        intent.putExtra(WebViewActivity.EXTRA_RESUME_MODE, true)
+        if (launchUrl.isNotEmpty()) {
             intent.putExtra(WebViewActivity.EXTRA_LAUNCH_URL, launchUrl)
         }
         if (!hostBaseUrl.isNullOrEmpty()) {
