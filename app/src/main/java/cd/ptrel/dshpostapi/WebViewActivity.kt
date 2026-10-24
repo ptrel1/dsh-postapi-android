@@ -983,6 +983,13 @@ class WebViewActivity : AppCompatActivity() {
         // 避免回填动作被当成一次用户点击。
         updateDesktopButtonText()
         binding.toggleDesktopButton.setOnClickListener { toggleDesktopMode() }
+        // v0.5.6：切换使用方式。
+        // 先回填文案再挂点击（同一套纪律，避免回填被当成点击）。
+        updateSwitchModeButtonText()
+        binding.switchModeButton.setOnClickListener {
+            hideMenu()
+            showSwitchModeDialog()
+        }
         binding.checkUpdateButton.setOnClickListener {
             hideMenu()
             // 用户主动触发：不受 30 分钟节流限制，且"已是最新"会有 Toast 反馈。
@@ -1571,6 +1578,104 @@ class WebViewActivity : AppCompatActivity() {
         updateDesktopButtonText()
         hideMenu()
         reload()
+    }
+
+    // ==========================================================================
+    // v0.5.6：抽屉里的「切换使用方式」
+    // ==========================================================================
+
+    /** 抽屉按钮上显示当前模式（「切换使用方式」在左，当前值由按钮文案带出）。 */
+    private fun updateSwitchModeButtonText() {
+        val compat = AppPrefs.getUiMode(this) == AppPrefs.UI_MODE_COMPAT
+        val current = getString(
+            if (compat) R.string.mode_compat_title else R.string.mode_full_title,
+        )
+        binding.switchModeButton.text = getString(R.string.mode_switch_current_short, current)
+    }
+
+    /**
+     * 切换使用方式的对话框。
+     *
+     * 与登录页那一份（LoginActivity.showModeDialog）**刻意重复**，而不是抽公共类：
+     *   · 两处只有十来行，抽出去要新建一个 dialog 文件 + 两处都改成调用它；
+     *   · 但两处的**行为不同** —— 登录页只是写 prefs + 刷新显示，
+     *     这里写完之后要**重建界面**（已经在完整模式里了，不改界面就看不到效果）。
+     *   把不同行为塞进同一个函数，得再加一个回调参数，反而不如各写一份清楚。
+     *
+     * ⚠️ 不要把说明放进 setMessage()：AlertDialog 的 setMessage 与
+     *    setSingleChoiceItems 共用同一个内容槽，先设 message 会把选项列表盖掉（实测踩过）。
+     */
+    private fun showSwitchModeDialog() {
+        val modes = arrayOf(AppPrefs.UI_MODE_FULL, AppPrefs.UI_MODE_COMPAT)
+        val titles = arrayOf(
+            getString(R.string.mode_full_title) + "\n" + getString(R.string.mode_full_desc),
+            getString(R.string.mode_compat_title) + "\n" + getString(R.string.mode_compat_desc),
+        )
+        val current = AppPrefs.getUiMode(this) ?: AppPrefs.UI_MODE_FULL
+        var picked = if (current == AppPrefs.UI_MODE_COMPAT) 1 else 0
+
+        val adapter = object : android.widget.ArrayAdapter<String>(this, 0, titles) {
+            override fun getView(position: Int, convertView: android.view.View?, parent: android.view.ViewGroup): android.view.View {
+                val v = convertView ?: layoutInflater.inflate(
+                    android.R.layout.simple_list_item_single_choice, parent, false,
+                )
+                (v as android.widget.CheckedTextView).text = getItem(position)
+                v.textSize = 14f
+                v.setLineSpacing(0f, 1.25f)
+                return v
+            }
+        }
+
+        android.app.AlertDialog.Builder(this)
+            .setTitle(R.string.mode_dialog_title)
+            .setSingleChoiceItems(adapter, picked) { _, which -> picked = which }
+            .setPositiveButton(R.string.mode_dialog_confirm) { _, _ ->
+                val target = modes[picked]
+                if (target == current) return@setPositiveButton   // 没变就什么都不做
+                if (!AppPrefs.setUiMode(this, target)) {
+                    android.util.Log.w("WebViewActivity", "persist ui mode failed")
+                }
+                relaunchIntoMode(target)
+            }
+            .setNegativeButton(R.string.mode_dialog_cancel, null)
+            .show()
+    }
+
+    /**
+     * 换模式后重建界面。
+     *
+     * 为什么必须重建而不是"就地刷新"：
+     *   完整模式是 WebView 承载官方网页、兼容模式是原生界面 —— 两者是不同的 Activity。
+     *   改一个 prefs 不会让当前这个 WebViewActivity 变成原生界面，只能重新进入。
+     *
+     * ⚠️ 目标界面必须带 EXTRA_RESUME_MODE + 非空 launchUrl：
+     *   WebViewActivity 有「launchUrl 为空视为被外部拉起，立刻 finish」的护栏；
+     *   而本方法在切到完整模式时虽然目标也是 WebViewActivity，同样需要这条。
+     *   resume 语义下用当前根路径即可（cookie 已经在 CookieManager 里）。
+     */
+    private fun relaunchIntoMode(mode: String) {
+        val target = if (mode == AppPrefs.UI_MODE_COMPAT) {
+            CompatActivity::class.java
+        } else {
+            WebViewActivity::class.java
+        }
+        val intent = android.content.Intent(this, target)
+        if (target == WebViewActivity::class.java) {
+            // 用当前 WebView 的根地址（不是当前页 URL —— 可能停在某个深层路由），
+            // 这样重新进来是干净的首屏，且 cookie 仍在。
+            intent.putExtra(EXTRA_LAUNCH_URL, hostBaseUrl.ifEmpty { currentRootUrl() })
+            intent.putExtra(EXTRA_RESUME_MODE, true)
+            intent.putExtra(EXTRA_HOST, hostBaseUrl)
+        }
+        startActivity(intent)
+        finish()
+    }
+
+    /** 兜底：从 AccountStore 取服务端根地址。 */
+    private fun currentRootUrl(): String {
+        val account = AccountStore.load(this)
+        val host = account?.host ?: return ""
+        return ApiClient.parseHost(host)?.let { it.baseUrl + "/" } ?: ""
     }
 
     /**

@@ -225,6 +225,25 @@
           ⚠️ 文案由代码动态设置（switch_to_desktop / switch_to_mobile），
              XML 里的 android:text 只是初始值，setupMenu() 会按实际状态覆盖。
         -->
+        <!--
+          v0.5.6：切换使用方式（完整模式 / 兼容模式）。
+
+          为什么放在抽屉里：抽屉是「低频但重要」动作的容器（切桌面版、检查更新、
+          诊断开关、退出登录都在这里）。模式切换同属这一类 —— 不是每次都要用，
+          但需要时得能找到。
+
+          为什么文案由代码动态生成：要显示**当前**是哪个模式（"切换使用方式  完整模式"），
+          XML 里的 android:text 只是初始占位，setupMenu() 会用真实值覆盖。
+        -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/switchModeButton"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:gravity="start|center_vertical"
+            android:text="@string/mode_switch_title"
+            android:textSize="14sp" />
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/toggleDesktopButton"
             style="@style/Widget.Material3.Button.TextButton"
