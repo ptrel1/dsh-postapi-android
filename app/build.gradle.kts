@@ -86,8 +86,8 @@ android {
         //      状态存 AppPrefs.desktop_mode（显示偏好，退出登录**不清**）。
         // 为什么是 Patch：两项是 bug 修复/UI 精简；桌面版切换虽是新功能，但只是一个显示开关，
         //   不改存储契约（新增独立 key）、不改变既有交互路径、无 API 变化。
-        versionCode = 24
-        versionName = "0.5.6"
+        versionCode = 27
+        versionName = "0.6.2"
     }
 
     buildFeatures {
@@ -135,6 +135,10 @@ dependencies {
     // 若第二版需要可靠地等待 cookie 落地，再引 androidx.webkit 并改用 WebViewCompat。
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("com.google.android.material:material:1.12.0")
+    // v0.6.0：兼容模式的消息与会话列表。
+    // 用 RecyclerView 而非 ListView：ViewHolder 复用是显式契约，配合 DiffUtil 能做局部刷新；
+    // ListView 在快速滚动 + 数据变化时容易出现视图错位。
+    implementation("androidx.recyclerview:recyclerview:1.3.2")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     // androidx.core 提供 WindowInsetsCompat / ViewCompat / WindowCompat，

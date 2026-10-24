@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  一条消息。用户消息靠右、助手消息靠左 —— 聊天类应用最通用的视觉约定，
+  用户不需要学习就能分清谁说的。
+
+  为什么不在这里画气泡背景：
+    bg_card 是通用的圆角卡片，用在两侧都合适；再单独做两套气泡色会让
+    「深色/浅色主题」的对比度需要各调一次，收益不抵成本。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingStart="16dp"
+    android:paddingEnd="16dp"
+    android:paddingTop="4dp"
+    android:paddingBottom="4dp">
+
+    <TextView
+        android:id="@+id/msgText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:maxWidth="300dp"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp"
+        android:background="@drawable/bg_card"
+        android:textSize="14sp"
+        android:lineSpacingExtra="3dp"
+        android:textIsSelectable="true"
+        android:textColor="?android:attr/textColorPrimary" />
+</LinearLayout>

@@ -18,6 +18,18 @@ class CompatActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // v0.6.0：CompatActivity 不再是一个"占位页"，而是一个**分发点** ——
+        // 它只做一件事：把用户送进会话列表，然后自己退出。
+        //
+        // 为什么保留这个空壳而不是让 LoginActivity 直接起 CompatSessionsActivity：
+        //   · 兼容模式的入口在 App 里有四五处（登录页、模式对话框、抽屉、CompatActivity 自身），
+        //     它们都指向 CompatActivity；把这层留着，改模式内部结构时不用动所有入口。
+        //   · 将来若要加"兼容模式的引导页/协议页"，插在这里最自然。
+        startActivity(android.content.Intent(this, CompatSessionsActivity::class.java))
+        finish()
+        return
+
+        @Suppress("UNREACHABLE_CODE")
         setContentView(R.layout.activity_compat)
 
         findViewById<android.view.View>(R.id.switchToFull).setOnClickListener {

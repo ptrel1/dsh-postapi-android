@@ -70,6 +70,18 @@
             android:exported="false" />
 
         <!-- v0.5.0：兼容模式入口（当前为占位页）。同 ModeSelectActivity，不导出。 -->
+        <!-- v0.6.0：兼容模式的会话列表与聊天页。都不导出。 -->
+        <activity
+            android:name=".CompatSessionsActivity"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
+            android:exported="false" />
+
+        <activity
+            android:name=".CompatChatActivity"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
         <activity
             android:name=".CompatActivity"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"

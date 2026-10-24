@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  v0.6.0：兼容模式的会话列表。
+
+  为什么用 RecyclerView 而不是 ListView：
+    RecyclerView 的 ViewHolder 复用是显式契约，配合 DiffUtil 能做局部刷新；
+    ListView 在快速滚动 + 数据变化时容易出现视图错位。
+
+  为什么不用 Compose：
+    项目现有依赖刻意最小（见 build.gradle.kts 注释），Compose 要额外引入
+    compose-bom + 编译器插件 + 2 个 runtime 依赖，体积涨 5MB+。
+    这里只有一个列表 + 一个聊天页，用 View 体系完全够。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="?android:attr/colorBackground">
+
+    <!-- 顶栏 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="16dp"
+        android:paddingEnd="8dp">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/compat_sessions_title"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:textColor="?android:attr/textColorPrimary" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/refreshSessions"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="0dp"
+            android:text="@string/compat_refresh" />
+    </LinearLayout>
+
+    <!-- 空态：没有会话 / 还没加载出来 -->
+    <TextView
+        android:id="@+id/sessionsEmpty"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingTop="48dp"
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp"
+        android:gravity="center"
+        android:text="@string/compat_sessions_empty"
+        android:textSize="14sp"
+        android:lineSpacingExtra="4dp"
+        android:textColor="?android:attr/textColorSecondary"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/sessionsError"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingTop="16dp"
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp"
+        android:gravity="center"
+        android:textSize="13sp"
+        android:textColor="?android:attr/colorAccent"
+        android:visibility="gone" />
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/sessionsList"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:paddingBottom="16dp" />
+
+    <!-- 底部新建会话 -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/newSession"
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="16dp"
+        android:text="@string/compat_new_session" />
+</LinearLayout>

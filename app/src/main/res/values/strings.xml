@@ -236,4 +236,19 @@
     <string name="mode_compat_coming">原生聊天界面正在开发中，当前为占位页</string>
     <!-- v0.5.6：抽屉里的模式切换按钮文案（%1$s = 当前模式名） -->
     <string name="mode_switch_current_short">切换使用方式（当前：%1$s）</string>
+
+    <!-- ==================== v0.6.0：兼容模式 ==================== -->
+    <string name="compat_sessions_title">会话</string>
+    <string name="compat_refresh">刷新</string>
+    <string name="compat_sessions_empty">还没有会话。\n点下方「新建会话」开始。</string>
+    <string name="compat_new_session">新建会话</string>
+    <string name="compat_back">返回</string>
+    <string name="compat_send">发送</string>
+    <string name="compat_stop">停止</string>
+    <string name="compat_input_hint">输入消息…</string>
+    <string name="compat_new_chat_title">新会话</string>
+    <string name="compat_loading">加载中…</string>
+    <string name="compat_not_logged_in">未登录或凭据已失效，请重新登录</string>
+    <string name="compat_plugin_too_old">当前插件版本不支持兼容模式（需要 dsh-postapi-bridge 1.9.0 及以上）</string>
+    <string name="compat_untitled">未命名会话</string>
 </resources>
