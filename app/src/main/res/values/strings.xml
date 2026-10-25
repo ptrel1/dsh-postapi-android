@@ -251,4 +251,10 @@
     <string name="compat_not_logged_in">未登录或凭据已失效，请重新登录</string>
     <string name="compat_plugin_too_old">当前插件版本不支持兼容模式（需要 dsh-postapi-bridge 1.9.0 及以上）</string>
     <string name="compat_untitled">未命名会话</string>
+
+    <!-- v0.7.0：交付物下载 -->
+    <string name="compat_downloading">正在下载 %1$s…</string>
+    <string name="compat_download_failed">下载失败：</string>
+    <string name="compat_open_failed">文件已保存到 %1$s，但没有应用能打开它</string>
+
 </resources>

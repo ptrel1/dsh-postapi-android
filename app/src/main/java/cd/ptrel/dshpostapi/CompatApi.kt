@@ -30,7 +30,13 @@ import java.util.concurrent.TimeUnit
  * ==================== ⚠️ 绝不要把 cookie 值写进日志 ====================
  * 本类所有 Log 只打方法名与状态码，不打请求头。
  */
-class CompatApi(private val hostBaseUrl: String, private val cookieName: String, private val cookieValue: String) {
+class CompatApi(
+    private val hostBaseUrl: String,
+    private val cookieName: String,
+    private val cookieValue: String,
+    /** 下载落盘目录（通常是 context.cacheDir）。 */
+    private val cacheDirCompat: java.io.File,
+) {
 
     companion object {
         private const val TAG = "CompatApi"
@@ -46,7 +52,7 @@ class CompatApi(private val hostBaseUrl: String, private val cookieName: String,
         fun fromStore(context: android.content.Context): CompatApi? {
             val account = AccountStore.load(context) ?: return null
             if (account.cookieValue.isEmpty()) return null
-            return CompatApi(account.host, account.cookieName, account.cookieValue)
+            return CompatApi(account.host, account.cookieName, account.cookieValue, context.cacheDir)
         }
     }
 
@@ -63,12 +69,23 @@ class CompatApi(private val hostBaseUrl: String, private val cookieName: String,
         val updatedAt: Long,
     )
 
+    /** 交付物：挂在某条助手消息下。 */
+    data class Deliverable(
+        val name: String,
+        val description: String,
+        /** 下载坐标：/file-ticket 需要 sessionId + seq + index。 */
+        val seq: Int,
+        val index: Int,
+    )
+
     /** 历史消息里的一条。 */
     data class Message(
         val seq: Int,
         val role: String,       // "user" / "assistant" / "other"
         val text: String,
         val time: Long,
+        /** 该轮产出的交付物（插件 v1.9.1 起提供）。空 = 没有。 */
+        val deliverables: List<Deliverable> = emptyList(),
     )
 
     /** 统一的结果类型：成功带值、失败带可展示的原因。 */
@@ -129,12 +146,28 @@ class CompatApi(private val hostBaseUrl: String, private val cookieName: String,
             val out = ArrayList<Message>(arr.length())
             for (i in 0 until arr.length()) {
                 val o = arr.optJSONObject(i) ?: continue
+                val delivArr = o.optJSONArray("deliverables")
+                val delivs = ArrayList<Deliverable>()
+                if (delivArr != null) {
+                    for (j in 0 until delivArr.length()) {
+                        val d = delivArr.optJSONObject(j) ?: continue
+                        delivs.add(
+                            Deliverable(
+                                name = d.optString("name", ""),
+                                description = d.optString("description", ""),
+                                seq = d.optInt("seq", 0),
+                                index = d.optInt("index", 0),
+                            ),
+                        )
+                    }
+                }
                 out.add(
                     Message(
                         seq = o.optInt("seq", 0),
                         role = o.optString("role", "other"),
                         text = o.optString("text", ""),
                         time = o.optLong("time", 0L),
+                        deliverables = delivs,
                     ),
                 )
             }
@@ -174,6 +207,84 @@ class CompatApi(private val hostBaseUrl: String, private val cookieName: String,
     }
 
     // ==========================================================================
+
+    // ==========================================================================
+    // v0.7.0：交付物下载
+    // ==========================================================================
+
+    /**
+     * 下载一个交付物到 cache 目录。
+     *
+     * 两步：
+     *   ① POST /file-ticket { sessionId, seq, index } → { url, filename }
+     *   ② GET 该 url（插件签发的临时票据地址，48h 内可触发）
+     *
+     * 为什么分两步而不是直接给最终地址：
+     *   清单里的直链（dl 票）也会过期，而票据接口能拿到**文件名与大小**，
+     *   失败时还能给出确切原因（文件被删 / 越界 / 过期），诊断成本更低。
+     *
+     * @return 成功时返回落盘后的 File。
+     */
+    fun downloadDeliverable(sessionId: String, d: Deliverable): Result<java.io.File> {
+        // ① 换票据
+        val payload = JSONObject()
+            .put("sessionId", sessionId)
+            .put("seq", d.seq)
+            .put("index", d.index)
+            .toString()
+        val ticketReq = Request.Builder()
+            .url(hostBaseUrl.trimEnd('/') + API_PREFIX + "/file-ticket")
+            .header("Cookie", cookieHeader())
+            .post(payload.toRequestBody(JSON_MEDIA))
+            .build()
+
+        val ticket = try {
+            client.newCall(ticketReq).execute().use { resp ->
+                val text = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful) {
+                    return Result.Err(httpReason(resp.code), resp.code)
+                }
+                JSONObject(text)
+            }
+        } catch (e: java.io.IOException) {
+            return Result.Err("网络错误：" + (e.message ?: e.javaClass.simpleName))
+        } catch (e: org.json.JSONException) {
+            return Result.Err("票据返回格式无法解析")
+        }
+
+        val path = ticket.optString("url", "")
+        if (path.isEmpty()) return Result.Err("服务端没有返回下载地址")
+        val filename = ticket.optString("filename", d.name).ifEmpty { d.name }
+
+        // ② 下载
+        val fileUrl = if (path.startsWith("http")) path else hostBaseUrl.trimEnd('/') + path
+        val getReq = Request.Builder()
+            .url(fileUrl)
+            .header("Cookie", cookieHeader())
+            .get()
+            .build()
+
+        return try {
+            client.newCall(getReq).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    return Result.Err(httpReason(resp.code), resp.code)
+                }
+                val body = resp.body ?: return Result.Err("服务端没有返回文件内容")
+                // 文件名消毒：模型给的名字可能含路径分隔符或 ..，直接拼路径会写到目录外。
+                val safe = filename.replace('/', '_').replace('\\', '_').let {
+                    if (it == "." || it == ".." || it.isBlank()) "download.bin" else it
+                }
+                val dir = java.io.File(cacheDirCompat, "deliverables").apply { mkdirs() }
+                val out = java.io.File(dir, safe)
+                body.byteStream().use { input ->
+                    out.outputStream().use { os -> input.copyTo(os) }
+                }
+                Result.Ok(out)
+            }
+        } catch (e: java.io.IOException) {
+            Result.Err("下载中断：" + (e.message ?: e.javaClass.simpleName))
+        }
+    }
 
     private fun cookieHeader(): String = "$cookieName=$cookieValue"
 

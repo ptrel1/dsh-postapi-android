@@ -1,11 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  一条消息。用户消息靠右、助手消息靠左 —— 聊天类应用最通用的视觉约定，
-  用户不需要学习就能分清谁说的。
+  一条消息 + 它下面挂的交付物卡片（v0.7.0）。
 
-  为什么不在这里画气泡背景：
-    bg_card 是通用的圆角卡片，用在两侧都合适；再单独做两套气泡色会让
-    「深色/浅色主题」的对比度需要各调一次，收益不抵成本。
+  用户消息靠右、助手消息靠左 —— 聊天类应用最通用的视觉约定。
+
+  为什么交付物挂在消息下（而不是独立列表页）：
+    「这个回复产出了这些文件」是因果关系的自然表达。独立列表页会让用户
+    在一个平铺的文件堆里找不到「这是哪一轮产生的」。
+    宿主事件里 deliverable 与 assistant 消息都有 turn 字段，正是为此设计的关联键。
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
@@ -30,4 +32,13 @@
         android:lineSpacingExtra="3dp"
         android:textIsSelectable="true"
         android:textColor="?android:attr/textColorPrimary" />
+
+    <!-- 交付物容器：由代码动态填充，无交付物时 GONE -->
+    <LinearLayout
+        android:id="@+id/deliverablesBox"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:orientation="vertical"
+        android:visibility="gone" />
 </LinearLayout>

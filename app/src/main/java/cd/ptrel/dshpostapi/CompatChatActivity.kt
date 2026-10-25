@@ -134,6 +134,65 @@ class CompatChatActivity : AppCompatActivity(), ChatViewModel.Listener {
 
     // ==========================================================================
 
+    // ==========================================================================
+    // v0.7.0：交付物下载
+    // ==========================================================================
+
+    /**
+     * 下载一个交付物。
+     *
+     * 流程：POST /file-ticket 换一次性下载地址 → OkHttp 下载到 cache → 用系统打开。
+     *
+     * 为什么不直接用 DownloadManager：
+     *   下载地址是插件签发的临时票据 URL（带 HMAC + 过期时间），
+     *   而 DownloadManager 是独立进程，带不上我们的会话 cookie；
+     *   把 URL 交给系统还会留下一条无法撤销的公开链接。
+     *   自己下到 cache 再交给系统打开，链接只在内存里存在几秒。
+     */
+    private fun downloadDeliverable(sessionId: String, d: CompatApi.Deliverable) {
+        val api = CompatApi.fromStore(this)
+        if (api == null) {
+            showError(getString(R.string.compat_not_logged_in))
+            return
+        }
+        showError(getString(R.string.compat_downloading, d.name))
+        Thread {
+            val result = api.downloadDeliverable(sessionId, d)
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                when (result) {
+                    is CompatApi.Result.Ok -> {
+                        hideError()
+                        openDownloadedFile(result.value)
+                    }
+                    is CompatApi.Result.Err ->
+                        showError(getString(R.string.compat_download_failed) + result.reason)
+                }
+            }
+        }.start()
+    }
+
+    /** 用系统「打开方式」打开下载好的文件。 */
+    private fun openDownloadedFile(file: java.io.File) {
+        try {
+            val mime = android.webkit.MimeTypeMap.getSingleton()
+                .getMimeTypeFromExtension(file.extension.lowercase()) ?: "*/*"
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                this, packageName + ".fileprovider", file,
+            )
+            startActivity(
+                android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, mime)
+                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                },
+            )
+        } catch (e: Exception) {
+            // 没有能打开这种文件的应用、或 FileProvider 未覆盖该路径：
+            // 给出确切路径让用户自己去找，而不是笼统地说失败了。
+            showError(getString(R.string.compat_open_failed, file.absolutePath))
+        }
+    }
+
     private fun scrollToBottom() {
         val n = adapter.itemCount
         if (n > 0) binding.messagesList.smoothScrollToPosition(n - 1)
@@ -168,6 +227,39 @@ class CompatChatActivity : AppCompatActivity(), ChatViewModel.Listener {
 
         inner class VH(v: View) : RecyclerView.ViewHolder(v) {
             val text: android.widget.TextView = v.findViewById(R.id.msgText)
+            val deliverablesBox: android.view.ViewGroup = v.findViewById(R.id.deliverablesBox)
+        }
+
+        /**
+         * 把某条消息的交付物渲染成卡片。
+         *
+         * 为什么每次重建子 View 而不是复用：
+         *   一条消息的交付物通常在 1~3 个，重建成本远小于写一套复用逻辑（还要处理
+         *   ViewHolder 回收时残留的点击监听）。RecyclerView 的回收粒度是整条消息，
+         *   这层的重建会被上层复用吃掉。
+         */
+        private fun bindDeliverables(holder: VH, msg: CompatApi.Message) {
+            val box = holder.deliverablesBox
+            if (msg.deliverables.isEmpty()) {
+                box.visibility = View.GONE
+                return
+            }
+            box.visibility = View.VISIBLE
+            // 只有内容变了才重建：RecyclerView 复用同一个 VH 时会反复调 onBind，
+            // 每次都 removeAllViews + inflate 会造成滚动掉帧。
+            if (box.tag == msg.deliverables) return
+            box.tag = msg.deliverables
+            box.removeAllViews()
+            val sessionId = vm?.sessionId() ?: return
+            for (d in msg.deliverables) {
+                val card = LayoutInflater.from(holder.itemView.context)
+                    .inflate(R.layout.item_deliverable, box, false)
+                card.findViewById<android.widget.TextView>(R.id.delivName).text = d.name
+                val desc = card.findViewById<android.widget.TextView>(R.id.delivDesc)
+                if (d.description.isBlank()) desc.visibility = View.GONE else desc.text = d.description
+                card.setOnClickListener { downloadDeliverable(sessionId, d) }
+                box.addView(card)
+            }
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
@@ -190,6 +282,8 @@ class CompatChatActivity : AppCompatActivity(), ChatViewModel.Listener {
             val lp = holder.text.layoutParams as android.widget.LinearLayout.LayoutParams
             lp.gravity = if (isUser) android.view.Gravity.END else android.view.Gravity.START
             holder.text.layoutParams = lp
+
+            bindDeliverables(holder, msg)
         }
     }
 }
