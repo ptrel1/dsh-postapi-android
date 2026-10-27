@@ -82,6 +82,8 @@ class CompatApi(
         val messages: List<Message>,
         /** turn -> 该轮产出的交付物。key 是 Number.toString()。 */
         val deliverablesByTurn: Map<Int, List<Deliverable>>,
+        /** 服务端是否还有更早的消息（v0.8.0 上翻加载用）。 */
+        val hasMore: Boolean = false,
     )
 
     /** 交付物：挂在某条助手消息下。 */
@@ -218,7 +220,7 @@ class CompatApi(
                     byTurn[turn] = dl
                 }
             }
-            HistoryPage(out, byTurn)
+            HistoryPage(out, byTurn, body.optBoolean("hasMore", false))
         }
     }
 

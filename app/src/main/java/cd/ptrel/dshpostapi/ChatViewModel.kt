@@ -43,6 +43,14 @@ class ChatViewModel(
 
         /** 忙闲状态变了（决定发送按钮是否可点、是否显示"停止"）。 */
         fun onBusyChanged(busy: Boolean)
+
+        /**
+         * 上翻加载状态变了（v0.8.0）。
+         *
+         * @param loading 正在加载更早的消息
+         * @param hasMore 服务端是否还有更早的
+         */
+        fun onLoadMoreChanged(loading: Boolean, hasMore: Boolean)
     }
 
 
@@ -56,6 +64,11 @@ class ChatViewModel(
     private var streaming = StringBuilder()
     private var busy = false
     private var cancelled = false
+
+    /** v0.8.0：是否还有更早的消息。unknown（null）= 还没读过。 */
+    private var hasMore = true
+    /** 正在加载更早的消息；防重复触发。 */
+    private var loadingMore = false
 
     fun sessionId(): String? = currentSessionId
 
@@ -99,11 +112,82 @@ class ChatViewModel(
                                 messages[i] = m.copy(deliverables = files)
                             }
                         }
+                        hasMore = result.value.hasMore
                         emitMessages()
+                        listener.onLoadMoreChanged(false, hasMore)
                     }
                     is CompatApi.Result.Err -> {
                         // 历史读失败不阻断发消息 —— 用户仍然可以说话，只是看不到上下文。
                         Log.w("ChatViewModel", "history failed: " + result.reason)
+                        listener.onTurnFinished(result.reason)
+                    }
+                }
+            }
+        }
+    }
+
+    // ==========================================================================
+    // v0.8.0：上翻加载更早的消息
+    // ==========================================================================
+
+    /**
+     * 加载更早一页消息，拼到列表**前面**。
+     *
+     * 分页游标是 beforeSeq = 当前最早一条消息的 seq。
+     * 为什么用消息 seq 而不是「第几页」：服务端按 seq 切窗口，
+     * 中间可能夹着大量 tool 前缀的事件（tool/call、tool/result 等），页码没有稳定含义。
+     *
+     * 幂等与并发：
+     *   · loadingMore 为 true 时直接返回 —— RecyclerView 滚动会连续触发多次；
+     *   · hasMore 为 false 时不再请求；
+     *   · 用户在加载过程中切会话（currentSessionId 变了）则丢弃结果 ——
+     *     否则会把上一个会话的历史拼到新会话里。
+     */
+    fun loadMore() {
+        val sid = currentSessionId ?: return
+        if (loadingMore || !hasMore || busy) return
+        val earliest = messages.firstOrNull { it.seq >= 0 }?.seq ?: return
+        if (earliest <= 0) return
+
+        loadingMore = true
+        listener.onLoadMoreChanged(true, hasMore)
+
+        io.execute {
+            val result = api.history(sid, beforeSeq = earliest, limit = 50)
+            main.post {
+                if (currentSessionId != sid) {
+                    loadingMore = false
+                    return@post
+                }
+                loadingMore = false
+                when (result) {
+                    is CompatApi.Result.Ok -> {
+                        val older = result.value.messages
+                        hasMore = result.value.hasMore
+                        if (older.isEmpty()) {
+                            listener.onLoadMoreChanged(false, hasMore)
+                            return@post
+                        }
+                        messages.addAll(0, older)
+
+                        // 交付物按 turn 对齐（与 openSession 同一套逻辑）。
+                        // 新加载的这一段同样要挂 —— 否则上翻后旧交付物仍然不显示。
+                        val byTurn = result.value.deliverablesByTurn
+                        if (byTurn.isNotEmpty()) {
+                            for (i in messages.indices) {
+                                val m = messages[i]
+                                if (m.role != "assistant" || m.turn < 0) continue
+                                if (m.deliverables.isNotEmpty()) continue
+                                val files = byTurn[m.turn] ?: continue
+                                messages[i] = m.copy(deliverables = files)
+                            }
+                        }
+                        emitMessages()
+                        listener.onLoadMoreChanged(false, hasMore)
+                    }
+                    is CompatApi.Result.Err -> {
+                        Log.w("ChatViewModel", "loadMore failed: " + result.reason)
+                        listener.onLoadMoreChanged(false, hasMore)
                         listener.onTurnFinished(result.reason)
                     }
                 }

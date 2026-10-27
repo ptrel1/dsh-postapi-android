@@ -59,6 +59,9 @@ class CompatChatActivity : AppCompatActivity(), ChatViewModel.Listener {
     /** 流式中的那条消息还没进列表，单独存一份给最后一行用。 */
     private var streamingText: String = ""
 
+    /** v0.8.0：「没有更多历史」只提示一次，避免每次滚到顶都弹。 */
+    private var loadMoreHintShown = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityCompatChatBinding.inflate(layoutInflater)
@@ -78,6 +81,22 @@ class CompatChatActivity : AppCompatActivity(), ChatViewModel.Listener {
         binding.messagesList.adapter = adapter
 
         binding.chatBack.setOnClickListener { finish() }
+
+        // v0.8.0：滚到顶部附近时加载更早的消息。
+        //
+        // 为什么用 addOnScrollListener 而不是 SwipeRefreshLayout：
+        //   聊天界面的「上翻」是**连续**动作（读到一半会一直往上滑），
+        //   下拉刷新需要先回顶再下拉，多一步且有视觉抖动。
+        //
+        // 阈值 3：留着 3 个 item 的余量就开始加载，用户滑到真正的顶部时数据通常已经到了，
+        // 不会出现"滑到顶停住等数据"的空白。
+        binding.messagesList.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrolled(rv: RecyclerView, dx: Int, dy: Int) {
+                if (dy >= 0) return   // 只关心向上滑（内容向下移）
+                val lm = rv.layoutManager as? LinearLayoutManager ?: return
+                if (lm.findFirstVisibleItemPosition() <= 3) vm?.loadMore()
+            }
+        })
         binding.chatSend.setOnClickListener { onSendClicked() }
 
         val api = CompatApi.fromStore(this)
@@ -130,6 +149,22 @@ class CompatChatActivity : AppCompatActivity(), ChatViewModel.Listener {
 
     override fun onBusyChanged(busy: Boolean) {
         binding.chatSend.text = getString(if (busy) R.string.compat_stop else R.string.compat_send)
+    }
+
+    /**
+     * v0.8.0：上翻加载状态。
+     *
+     * 加载中不显示任何转圈 —— 顶部第一条消息上方会「多出内容」本身就是反馈，
+     * 再加一个 loading 条会让列表跳动（它插在 index 0，会让用户正在读的位置位移）。
+     * 只在"没有更多"时给一次 Toast 级别的提示。
+     */
+    override fun onLoadMoreChanged(loading: Boolean, hasMore: Boolean) {
+        if (!loading && !hasMore && loadMoreHintShown == false) {
+            loadMoreHintShown = true
+            android.widget.Toast.makeText(
+                this, R.string.compat_no_more_history, android.widget.Toast.LENGTH_SHORT,
+            ).show()
+        }
     }
 
     // ==========================================================================

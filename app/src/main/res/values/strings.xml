@@ -257,4 +257,7 @@
     <string name="compat_download_failed">下载失败：</string>
     <string name="compat_open_failed">文件已保存到 %1$s，但没有应用能打开它</string>
 
+
+    <!-- v0.8.0：上翻加载 -->
+    <string name="compat_no_more_history">已经是全部了</string>
 </resources>
