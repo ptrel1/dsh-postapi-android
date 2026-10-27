@@ -85,7 +85,20 @@ class ChatViewModel(
                     is CompatApi.Result.Ok -> {
                         // 服务端按时间正序返回；这里直接替换，不追加。
                         messages.clear()
-                        messages.addAll(result.value)
+                        messages.addAll(result.value.messages)
+
+                        // v1.9.3：用消息自带的 turn 直接对齐 ——
+                        // 每条 assistant/message 都带 data.turn，插件现在把它下发了。
+                        // 早先版本靠「第 N 条助手消息 ≈ 第 N 个 turn」猜，会挂错（一轮可能多条助手消息）。
+                        val byTurn = result.value.deliverablesByTurn
+                        if (byTurn.isNotEmpty()) {
+                            for (i in messages.indices) {
+                                val m = messages[i]
+                                if (m.role != "assistant" || m.turn < 0) continue
+                                val files = byTurn[m.turn] ?: continue
+                                messages[i] = m.copy(deliverables = files)
+                            }
+                        }
                         emitMessages()
                     }
                     is CompatApi.Result.Err -> {

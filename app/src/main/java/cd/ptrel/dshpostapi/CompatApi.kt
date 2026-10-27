@@ -69,6 +69,21 @@ class CompatApi(
         val updatedAt: Long,
     )
 
+    /**
+     * 一次历史读取的结果。
+     *
+     * 为什么把交付物放在**顶层**而不是只挂在消息上：
+     *   宿主的分页窗口只包含「最近 N 条消息」那一段事件，而交付物事件的 seq
+     *   可能远在窗口之外（实测某会话：消息 seq 18540~18965，交付物 seq 1781~18214，零重叠）。
+     *   所以插件 v1.9.2 起单独返回 deliverablesByTurn —— App 按 turn 挂到消息上，
+     *   消息不在当前页就先存着，翻到再显示。
+     */
+    data class HistoryPage(
+        val messages: List<Message>,
+        /** turn -> 该轮产出的交付物。key 是 Number.toString()。 */
+        val deliverablesByTurn: Map<Int, List<Deliverable>>,
+    )
+
     /** 交付物：挂在某条助手消息下。 */
     data class Deliverable(
         val name: String,
@@ -86,6 +101,11 @@ class CompatApi(
         val time: Long,
         /** 该轮产出的交付物（插件 v1.9.1 起提供）。空 = 没有。 */
         val deliverables: List<Deliverable> = emptyList(),
+        /**
+         * 这条助手消息属于第几轮（插件 v1.9.3 起下发）。
+         * 用户消息通常没有 turn（宿主只在 assistant/message 上带）。
+         */
+        val turn: Int = -1,
     )
 
     /** 统一的结果类型：成功带值、失败带可展示的原因。 */
@@ -130,7 +150,7 @@ class CompatApi(
     // GET /chat/history
     // ==========================================================================
 
-    fun history(sessionId: String, beforeSeq: Int? = null, limit: Int = 50): Result<List<Message>> {
+    fun history(sessionId: String, beforeSeq: Int? = null, limit: Int = 50): Result<HistoryPage> {
         val sb = StringBuilder(hostBaseUrl.trimEnd('/') + API_PREFIX + "/chat/history")
         sb.append("?sessionId=").append(java.net.URLEncoder.encode(sessionId, "UTF-8"))
         sb.append("&limit=").append(limit)
@@ -168,10 +188,37 @@ class CompatApi(
                         text = o.optString("text", ""),
                         time = o.optLong("time", 0L),
                         deliverables = delivs,
+                        turn = o.optInt("turn", -1),
                     ),
                 )
             }
-            out
+
+            // 顶层 deliverablesByTurn：按 turn 收集，不受分页窗口限制（插件 v1.9.2）。
+            // 用 String key 读再转 Int —— org.json 的 keys() 只给 String。
+            val byTurn = HashMap<Int, List<Deliverable>>()
+            val topObj = body.optJSONObject("deliverablesByTurn")
+            if (topObj != null) {
+                val it = topObj.keys()
+                while (it.hasNext()) {
+                    val keyStr = it.next()
+                    val turn = keyStr.toIntOrNull() ?: continue
+                    val list = topObj.optJSONArray(keyStr) ?: continue
+                    val dl = ArrayList<Deliverable>(list.length())
+                    for (j in 0 until list.length()) {
+                        val d = list.optJSONObject(j) ?: continue
+                        dl.add(
+                            Deliverable(
+                                name = d.optString("name", ""),
+                                description = d.optString("description", ""),
+                                seq = d.optInt("seq", 0),
+                                index = d.optInt("index", 0),
+                            ),
+                        )
+                    }
+                    byTurn[turn] = dl
+                }
+            }
+            HistoryPage(out, byTurn)
         }
     }
 

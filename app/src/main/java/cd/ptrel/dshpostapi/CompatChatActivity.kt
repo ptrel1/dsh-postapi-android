@@ -245,12 +245,28 @@ class CompatChatActivity : AppCompatActivity(), ChatViewModel.Listener {
                 return
             }
             box.visibility = View.VISIBLE
-            // 只有内容变了才重建：RecyclerView 复用同一个 VH 时会反复调 onBind，
-            // 每次都 removeAllViews + inflate 会造成滚动掉帧。
-            if (box.tag == msg.deliverables) return
-            box.tag = msg.deliverables
+
+            // ⚠️ 缓存键必须包含 sessionId：下载闭包要用它。
+            //    只用 deliverables 当 tag 会在「同一个 VH 复用到另一条消息」时残留旧内容
+            //    （View.tag 是 View 上的属性，VH 回收时不会自动清）。
+            val sessionId = vm?.sessionId()
+            val key = sessionId + "|" + msg.deliverables.joinToString(",") { it.seq.toString() + ":" + it.index }
+            if (box.tag == key) return
+            box.tag = key
             box.removeAllViews()
-            val sessionId = vm?.sessionId() ?: return
+
+            if (sessionId == null) {
+                // 没有会话 id 时（极早期 / 会话被清），至少把文件名显示出来 ——
+                // 静默不显示会让用户以为"这条消息没有交付物"。
+                for (d in msg.deliverables) {
+                    val tv = android.widget.TextView(holder.itemView.context)
+                    tv.text = d.name
+                    tv.textSize = 13f
+                    box.addView(tv)
+                }
+                return
+            }
+
             for (d in msg.deliverables) {
                 val card = LayoutInflater.from(holder.itemView.context)
                     .inflate(R.layout.item_deliverable, box, false)
