@@ -38,4 +38,17 @@
     <cache-path
         name="filechooser"
         path="filechooser/" />
+
+    <!--
+      v0.7.0：兼容模式的交付物下载目标。
+      CompatApi.downloadDeliverable 把文件写到 cacheDir/deliverables/，
+      交给系统「打开方式」时需要以 content:// 暴露它。
+
+      ⚠️ 漏配时的现象极具迷惑性：下载本身成功（文件确实落盘了），
+         但 getUriForFile 抛 IllegalArgumentException，被 catch 成
+         「没有应用能打开它」—— 用户会以为是手机缺应用，实际是白名单没配。
+    -->
+    <cache-path
+        name="deliverables"
+        path="deliverables/" />
 </paths>
