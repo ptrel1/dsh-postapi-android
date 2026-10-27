@@ -40,6 +40,27 @@ class CompatApi(
 
     companion object {
         private const val TAG = "CompatApi"
+
+        /**
+         * 所有请求统一的 User-Agent（v0.8.1）。
+         *
+         * ⚠️ 这不是可选的礼貌头，而是**会话存活的必要条件**：
+         *
+         * 插件把会话绑定在 UA 设备类别上（lib/index.js）：登录时 ApiClient 上报的是
+         * 「Mozilla/5.0 (Linux; Android...) Mobile Safari...」，类别 = mobile。
+         * 而 CompatApi 早先**不带 UA**，OkHttp 默认发 "okhttp/4.12.0"，
+         * uaDeviceClass() 判成 other —— 永远不等于 mobile。
+         *
+         * 后果：兼容模式每个请求都被判 mismatch，mismatchCount 累计到 3
+         * 插件就**吊销整个会话**，用户看到的就是「账号失效」。
+         * 而且完整模式与兼容模式来回切几次就必现（两边 UA 不同）。
+         *
+         * 修法：与 ApiClient 保持同一个字面量。两边必须一致 ——
+         * 改这里就要同步改 ApiClient.kt 与 UpdateClient.mobileUserAgent()。
+         */
+        private const val MOBILE_UA =
+            "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 DSH-PostAPI-Android"
         private const val API_PREFIX = "/api/dsh/v1"
         private val JSON_MEDIA = "application/json; charset=utf-8".toMediaTypeOrNull()
 
@@ -125,6 +146,7 @@ class CompatApi(
         val req = Request.Builder()
             .url(hostBaseUrl.trimEnd('/') + API_PREFIX + "/sessions")
             .header("Cookie", cookieHeader())
+            .header("User-Agent", MOBILE_UA)
             .get()
             .build()
         return exec(req) { body ->
@@ -161,6 +183,7 @@ class CompatApi(
         val req = Request.Builder()
             .url(sb.toString())
             .header("Cookie", cookieHeader())
+            .header("User-Agent", MOBILE_UA)
             .get()
             .build()
         return exec(req) { body ->
@@ -233,6 +256,7 @@ class CompatApi(
         val req = Request.Builder()
             .url(hostBaseUrl.trimEnd('/') + API_PREFIX + "/chat/cancel")
             .header("Cookie", cookieHeader())
+            .header("User-Agent", MOBILE_UA)
             .post(payload.toRequestBody(JSON_MEDIA))
             .build()
         return exec(req) { body -> body.optBoolean("ok", false) }
@@ -250,6 +274,7 @@ class CompatApi(
         return Request.Builder()
             .url(hostBaseUrl.trimEnd('/') + API_PREFIX + "/chat/stream")
             .header("Cookie", cookieHeader())
+            .header("User-Agent", MOBILE_UA)
             .header("Accept", "text/event-stream")
             .post(json.toString().toRequestBody(JSON_MEDIA))
             .build()
@@ -284,6 +309,7 @@ class CompatApi(
         val ticketReq = Request.Builder()
             .url(hostBaseUrl.trimEnd('/') + API_PREFIX + "/file-ticket")
             .header("Cookie", cookieHeader())
+            .header("User-Agent", MOBILE_UA)
             .post(payload.toRequestBody(JSON_MEDIA))
             .build()
 
@@ -310,6 +336,7 @@ class CompatApi(
         val getReq = Request.Builder()
             .url(fileUrl)
             .header("Cookie", cookieHeader())
+            .header("User-Agent", MOBILE_UA)
             .get()
             .build()
 
