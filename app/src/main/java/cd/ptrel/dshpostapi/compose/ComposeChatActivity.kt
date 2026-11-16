@@ -86,7 +86,9 @@ class ComposeChatActivity : ComponentActivity() {
                 androidx.compose.runtime.LaunchedEffect(sessionId) {
                     if (!sessionId.isNullOrEmpty()) vm.openSession(sessionId)
                 }
-                Scaffold { padding ->
+                // 会把 ChatScreen 里的 AppBackground 整个盖住（实测：
+                // 会话列表有背景、聊天页没有，就是这个原因）。
+                Scaffold(containerColor = androidx.compose.ui.graphics.Color.Transparent) { padding ->
                     ChatScreen(
                         viewModel = vm,
                         title = sessionTitle,

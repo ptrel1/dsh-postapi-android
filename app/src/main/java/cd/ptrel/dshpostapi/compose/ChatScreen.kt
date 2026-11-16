@@ -19,6 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import cd.ptrel.dshpostapi.CompatApi
+import cd.ptrel.dshpostapi.R
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.withFrameNanos
@@ -206,6 +207,10 @@ fun ChatScreen(
     // 包在 Scaffold 外面：Scaffold 会自己铺底色，包里面等于被盖住。
     AppBackground(path = backgroundPath) {
     Scaffold(
+        // 透明底：Scaffold 默认用 colorScheme.background 铺满整块，
+        // 会把外层的 AppBackground 完全盖住（会话列表那边没 Scaffold，
+        // 所以只在聊天页出现「背景没生效」）。
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
             // 用移植来的 ChatTopBar：☰ 标题 ｜ 右侧新建。
             // 早先这一页**没有任何顶栏** —— 用户进了会话就出不去（只能按系统返回键），
@@ -270,6 +275,22 @@ fun ChatScreen(
                 // v0.12.1：只保留「复制」。重新生成/编辑/删除依赖服务端能力，
                 // 而 DSH 的会话日志是追加式的，改删在语义上不成立。
                 showMutatingActions = false,
+                // v0.12.2：接入复制 —— 之前只隐藏了另外三个，复制本身也没接，
+                // 表现为「点了没反应」（用户反馈）。
+                onCopy = { msg ->
+                    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                        as android.content.ClipboardManager
+                    clipboard.setPrimaryClip(
+                        android.content.ClipData.newPlainText("消息", msg.content),
+                    )
+                    // Android 13+ 会在系统层显示「已复制」气泡，无需自己弹 Toast；
+                    // 低版本系统没有那个提示，统一给一个短 Toast 保证有反馈。
+                    if (android.os.Build.VERSION.SDK_INT < 33) {
+                        android.widget.Toast.makeText(
+                            context, R.string.action_copied, android.widget.Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                },
                 // 底部留给浮层输入栏，否则最后一条永远被压在下面滚不出来。
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                 // 其余回调全部用默认值：本项目暂不支持重新生成/编辑/分叉/朗读。
