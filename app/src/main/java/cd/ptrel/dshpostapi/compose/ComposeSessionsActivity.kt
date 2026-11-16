@@ -101,7 +101,7 @@ class ComposeSessionsActivity : ComponentActivity() {
                     state = state,
                     onRefresh = vm::load,
                     onRetry = vm::retry,
-                    onOpenSession = { row -> openChat(row.sessionId) },
+                    onOpenSession = { row -> openChat(row.sessionId, row.title) },
                     onNewSession = { openChat(null) },
                     onSwitchMode = ::switchToFullMode,
                     onCheckUpdate = { Updates.checkManually(this@ComposeSessionsActivity) },
@@ -145,10 +145,14 @@ class ComposeSessionsActivity : ComponentActivity() {
     // ==========================================================================
 
     /** 进聊天页。sessionId 为 null = 新会话。 */
-    private fun openChat(sessionId: String?) {
+    private fun openChat(sessionId: String?, title: String? = null) {
         startActivity(
             Intent(this, ComposeChatActivity::class.java).apply {
                 if (sessionId != null) putExtra(ComposeChatActivity.EXTRA_SESSION_ID, sessionId)
+                // 标题一起带过去（v0.10.4）：列表页已经有它了，
+                // 聊天页再请求一次既慢又可能拿到不一致的值（列表快照 vs 服务端最新）。
+                // 空标题不必传 —— 聊天页会对空串显示占位文案。
+                if (!title.isNullOrBlank()) putExtra(ComposeChatActivity.EXTRA_SESSION_TITLE, title)
             },
         )
     }
