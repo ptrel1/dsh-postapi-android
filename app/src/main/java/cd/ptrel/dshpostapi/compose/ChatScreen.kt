@@ -26,6 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -149,10 +150,47 @@ fun ChatScreen(
         }
     }
 
-    // 流式跟随：只在用户本来就贴底时才滚，否则不打扰正在读历史的用户。
+    // ---- 流式跟随（v0.11.1 修正）----
+    //
+    // ⚠️ 不能用 isAtBottom 作门槛。它的定义是 `!canScrollForward`，而那是
+    //    Compose 的**布局状态**，在**下一帧**才更新 ——
+    //    流式每追加一点内容，canScrollForward 就变 true，
+    //    于是下一帧 isAtBottom=false ⇒ 跟随停掉。
+    //    实测表现：只滚一两下就停，用户得不断手动往下拉。
+    //
+    // 正确的判据是「**用户有没有主动滚开**」，那是输入意图，不是布局状态。
+    // 用 listState.isScrollInProgress：手指按着拖动时它为 true，此时不要抢。
+    // ---- 跟随标志（v0.11.2，对齐官方 Web 的做法）----
+    //
+    // 官方的 dsh-client-ui-chat 用**独立于布局的 follow 布尔**：
+    //   scrollToBottom(follow, behavior)  —— follow 由用户滚动位置维护
+    //   [data-chat-following-tail] .scroll { overflow-anchor: none }
+    // 而不是每次问「当前是不是在底部」。
+    //
+    // 为什么必须独立：`canScrollForward` 是布局状态，流式追加瞬间它就是 true，
+    // 于是「刚才还在底部」这个**意图**被误判成「用户滚开了」，跟随中断。
+    // 实测表现为只滚一两下就停。
+    //
+    // 维护方式：订阅滚动位置，用户主动向上滑（firstVisibleItemIndex 回退或
+    // 向后滚动超过阈值）就关掉 follow；滑回底部就重新打开。
+    var following by remember(state.sessionId) { mutableStateOf(true) }
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress to listState.canScrollForward }
+            .collect { (scrolling, canForward) ->
+                // 只在**用户手指参与**时改意图；程序滚动（我们自己调 followBottom）不算。
+                if (scrolling) {
+                    // 手指在动：他往上拖就停止跟随
+                    following = !canForward
+                }
+            }
+    }
+
     LaunchedEffect(lastMessageLen) {
         if (state.messages.isEmpty() || !positioned) return@LaunchedEffect
-        if (!isAtBottom) return@LaunchedEffect
+        // 用户正在拖动/惯性滑动：让给他，别抢
+        if (listState.isScrollInProgress) return@LaunchedEffect
+        // 用**意图标志**而不是布局状态判断要不要跟（见上方说明）
+        if (!following) return@LaunchedEffect
         // followBottom 每帧吃掉剩余距离的 0.7（见 ScrollToBottom.kt 的长注释）：
         // 内容每 50ms 离散来一批，直接 scrollToItem 会变成「每 50ms 跳一个台阶」。
         listState.followBottom()

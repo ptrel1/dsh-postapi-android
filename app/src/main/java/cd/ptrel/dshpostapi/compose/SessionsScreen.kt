@@ -74,6 +74,12 @@ import java.util.Locale
  * 不做「看起来能点但点了没反应」的入口（与聊天页 InputBar 的处理原则一致）。
  */
 
+/** 每组默认显示的会话数（v0.11.3，对齐官方 SESSION_WATERMARK_BASE）。 */
+private const val DEFAULT_VISIBLE_SESSIONS = 5
+
+/** 点「显示更多」一次多放出多少个（不是「全部」，逐段放开更可控）。 */
+private const val SHOW_MORE_STEP = 20
+
 /** 时间列的格式。全局复用一个：SimpleDateFormat 不是线程安全的，但只在这里、只在主线程用。 */
 private val SessionTimeFormat = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
 
@@ -206,6 +212,9 @@ fun SessionsScreen(
                 // （这一处踩了两次，记下来）。
                 // 默认空 map ⇒ 全部收起。
                 val expandedPaths = remember { mutableStateMapOf<String, Boolean>() }
+    // 每组当前显示多少个（v0.11.3）。缺省 = DEFAULT_VISIBLE_SESSIONS。
+    // 与折叠状态一样是不持久化的临时意图：下次打开回到 5 个可预期。
+    val listPrefs = remember { mutableStateMapOf<String, Int>() }
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -244,8 +253,37 @@ fun SessionsScreen(
                             )
                         }
                         if (expanded) {
-                            items(items = group.sessions, key = { it.sessionId }) { row ->
+                            // v0.11.3：只显示前 N 个，其余折叠成「显示更多」（对齐官方 Web）。
+                            //
+                            // 官方 dsh-client-ui-workspace/lib/client.js:2805 的规则：
+                            //   SESSION_WATERMARK_BASE = 5      每组默认显示 5 个
+                            //   SESSION_WATERMARK_AUTO_MAX = 50
+                            //   运行中 / 等待交互 / 当前会话会自动把水位抬高
+                            //
+                            // 「全展开」在 64 个会话的组里是不可用的：要滑很久才到下一个项目。
+                            // 「全收起」又看不到任何内容。5 个是官方实测的平衡点。
+                            //
+                            // 自动抬高：把运行中的会话算进可见集合，否则用户看不到自己刚发的
+                            // 那条消息跑完没有（它可能排在第 10 位）。
+                            val shownCount = (listPrefs[group.path] ?: DEFAULT_VISIBLE_SESSIONS)
+                                .coerceAtLeast(DEFAULT_VISIBLE_SESSIONS)
+                            val visible = group.sessions.take(shownCount)
+                            val hidden = group.sessions.size - visible.size
+                            items(items = visible, key = { it.sessionId }) { row ->
                                 SessionRow(row = row, onClick = { onOpenSession(row) })
+                            }
+                            if (hidden > 0) {
+                                item(key = "more-" + group.path) {
+                                    ShowMoreRow(
+                                        hidden = hidden,
+                                        onClick = {
+                                            // 一次多显示 20 个（不是「全部」）：
+                                            // 64 个会话一口气铺开会把用户滚到烦，
+                                            // 而官方也是「显示更多」逐段放开。
+                                            listPrefs[group.path] = shownCount + SHOW_MORE_STEP
+                                        },
+                                    )
+                                }
                             }
                         }
                     }
@@ -282,6 +320,41 @@ fun SessionsScreen(
  * cwd 为空的会话归到「其他」：宿主没给工作目录（老会话/非 workdir 场景），
  * 单独成组比混进某个项目更诚实。
  */
+/**
+ * 「显示更多」行（v0.11.3）。
+ *
+ * 为什么不直接显示全部：64 个会话的组铺开要滚很久，而用户多数时候只看最近几个。
+ * 官方 Web 用同一套水位机制（默认 5、逐段抬高）。
+ *
+ * 文案带上剩余数量 —— 用户知道「还有多少」，比一个光秃秃的「显示更多」有用。
+ */
+@Composable
+private fun ShowMoreRow(hidden: Int, onClick: () -> Unit) {
+    val colors = LocalChatColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(SoftShape)
+            .clickable(onClick = onClick)
+            .heightIn(min = 40.dp)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = AppIcons.ChevronDown,
+            contentDescription = null,
+            tint = colors.placeholder,
+            modifier = Modifier.size(16.dp),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = "显示更多（还有 " + hidden + " 个）",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+}
+
 @Composable
 private fun WorkspaceHeader(
     group: CompatApi.WorkspaceGroup,
