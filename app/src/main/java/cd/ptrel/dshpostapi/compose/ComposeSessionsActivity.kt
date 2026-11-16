@@ -315,11 +315,29 @@ class ComposeSessionsActivity : ComponentActivity() {
         return try {
             val dir = java.io.File(filesDir, "background")
             if (!dir.exists() && !dir.mkdirs()) return null
-            // 固定文件名：换背景时覆盖，不会在私有目录里堆一堆旧图。
-            val target = java.io.File(dir, "bg.img")
+            // ⚠️ 用**带时间戳的新文件名**，而不是覆盖固定的 bg.img（v0.13.1 修复）。
+            //
+            // 覆盖同一路径会踩两个坑：
+            //   ① Compose 的 remember(path) 只认字符串，path 不变就不重新解码
+            //      → 用户换图后界面还是上一张（这是用户实际反馈的 bug）
+            //   ② 就算改成看 mtime，同尺寸图片在同一秒内替换时 mtime 可能不变
+            //      → 仍然不刷新
+            //
+            // 换成新文件名后 path 本身就变了，两个坑一起消失。
+            // 旧文件在写入成功后删掉，私有目录里始终只有一张图。
+            val target = java.io.File(dir, "bg-" + System.currentTimeMillis() + ".img")
             contentResolver.openInputStream(uri)?.use { input ->
                 target.outputStream().use { output -> input.copyTo(output) }
             } ?: return null
+            // 写成功了才清理旧图：万一新图写失败，旧的还能用。
+            try {
+                val previous = AppPrefs.getBackgroundPath(this)
+                if (!previous.isNullOrBlank() && previous != target.absolutePath) {
+                    val old = java.io.File(previous)
+                    // 只删自己目录下的文件，避免误删用户别处的东西
+                    if (old.parentFile?.absolutePath == dir.absolutePath) old.delete()
+                }
+            } catch (_: Exception) {}
             // 写进 Prefs 供下次启动直接读；本进程内由 Compose state 接管。
             AppPrefs.setBackgroundPath(this, target.absolutePath)
             target.absolutePath

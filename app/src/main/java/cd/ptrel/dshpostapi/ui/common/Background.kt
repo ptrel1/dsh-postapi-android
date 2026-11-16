@@ -44,12 +44,33 @@ fun AppBackground(
     content: @Composable () -> Unit,
 ) {
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    // 路径变化才重新解码；null / 空串 = 没有背景图
-    val bitmap = remember(path) {
-        if (path.isNullOrBlank()) null else null
+    // ⚠️ 缓存键必须包含**文件修改时间**（v0.13.1 修复）。
+    //
+    // 用户第二次换背景时主页不更新 —— 因为 saveBackground 写的是**同一个路径**
+    // （filesDir/background/bg.img，固定名以便覆盖旧图），
+    // 而 remember(path) / LaunchedEffect(path) 只认字符串变化：
+    // path 没变 → 不重新解码 → 界面仍是上一张图。
+    //
+    // 用 (路径, mtime, 大小) 三元组当键：换图后 mtime 必然变，键就变了。
+    // 大小兜底覆盖「同一秒内替换且 mtime 精度不够」的边缘情况。
+    // ⚠️ 不要用 remember 包住：换图时 path 不变，remember(path) 会一直返回旧 stamp，
+    // 等于回到了原来的 bug。这里每次重组都读一次 stat ——
+    // 一次 stat(2) 的成本远低于一次错误的重绘决策。
+    val stamp = if (path.isNullOrBlank()) 0L else {
+        try {
+            val f = File(path)
+            // mtime 与长度拼成一个 Long：长度在高位，mtime 在低位。
+            // 加长度是因为某些文件系统 mtime 精度只到秒，
+            // 同一秒内换图时长度变化能兜住。
+            if (f.isFile) (f.length() shl 32) xor f.lastModified() else 0L
+        } catch (e: Exception) {
+            0L
+        }
     }
-    var image by remember(path) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
-    LaunchedEffect(path) {
+    // 键 = 路径 + 时间戳；任一变都重新解码。
+    val cacheKey = (path ?: "") + "#" + stamp
+    var image by remember(cacheKey) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    LaunchedEffect(cacheKey) {
         image = if (path.isNullOrBlank()) {
             null
         } else {
