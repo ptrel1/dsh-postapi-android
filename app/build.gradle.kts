@@ -100,8 +100,8 @@ android {
         //      状态存 AppPrefs.desktop_mode（显示偏好，退出登录**不清**）。
         // 为什么是 Patch：两项是 bug 修复/UI 精简；桌面版切换虽是新功能，但只是一个显示开关，
         //   不改存储契约（新增独立 key）、不改变既有交互路径、无 API 变化。
-        versionCode = 35
-        versionName = "0.8.2"
+        versionCode = 36
+        versionName = "0.9.0"
     }
 
     buildFeatures {
@@ -171,6 +171,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
     debugImplementation("androidx.compose.ui:ui-tooling")
+    // 协程。Compose 侧用 callbackFlow 消费 SSE，取消语义靠它保证。
+    // 版本跟随 BOM 之外的稳定线，与 lifecycle 2.8.6 兼容。
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     // androidx.core 提供 WindowInsetsCompat / ViewCompat / WindowCompat，
     // 是系统栏留白（WindowInsetsHelper）的直接依赖。
     // 为什么显式声明：appcompat 会**传递**带入 core-ktx，那属于"运气"；

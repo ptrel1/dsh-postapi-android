@@ -130,10 +130,18 @@ class CompatSessionsActivity : AppCompatActivity() {
     }
 
     private fun openChat(sessionId: String?, title: String?) {
+        // v0.9.0：聊天页切到 Compose 实现。
+        //
+        // 旧的 CompatChatActivity（XML + RecyclerView）暂时保留在仓库里：
+        // 它验证过的那些坑（流式占位消息、交付物卡片、上翻加载）在 Compose 版
+        // 重新实现并验证之前，不能删 —— 删了就没有可回退的参照。
+        //
+        // title 不传：Compose 版顶部标题还没做，传了也用不上。
         startActivity(
-            Intent(this, CompatChatActivity::class.java).apply {
-                if (sessionId != null) putExtra(CompatChatActivity.EXTRA_SESSION_ID, sessionId)
-                if (title != null) putExtra(CompatChatActivity.EXTRA_TITLE, title)
+            android.content.Intent(this, cd.ptrel.dshpostapi.compose.ComposeChatActivity::class.java).apply {
+                if (sessionId != null) {
+                    putExtra(cd.ptrel.dshpostapi.compose.ComposeChatActivity.EXTRA_SESSION_ID, sessionId)
+                }
             },
         )
     }

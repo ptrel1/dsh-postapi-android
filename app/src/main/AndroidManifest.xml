@@ -94,6 +94,13 @@
           Compose 的 IME 处理靠 WindowInsets.ime，需要窗口真的被 resize
           （adjustNothing 会让 Compose 以为没有键盘）。等聊天页落地时再统一核对。
         -->
+        <!-- v0.9.0：Compose 聊天页。adjustResize 配合 imePadding() —— 两者缺一键盘会盖住输入框。 -->
+        <activity
+            android:name=".compose.ComposeChatActivity"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
         <activity
             android:name=".ComposeProbeActivity"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
