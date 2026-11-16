@@ -168,9 +168,43 @@ object AppPrefs {
     // 存「最后一次活跃的会话」而不是整体会话列表：
     //   · 会话列表以服务端为准（/sessions），本地缓存反而会不一致；
     //   · 用户重开 App 的预期是「接着上次那段聊」，不是「回到某个固定页」。
+    const val KEY_BACKGROUND_PATH = "background_path"
     const val KEY_LAST_SESSION_ID = "last_session_id"
 
     /** 读取上次活跃会话 id；从未记过或读取失败返回 null。 */
+    /**
+     * 用户自定义背景图（v0.12.0）。
+     *
+     * 存**绝对路径**（app 私有目录下的文件），不是 Uri ——
+     * Uri 的临时读权限在进程重启后失效，而背景图要长期可用。
+     * 空 = 没设置，用主题默认背景。
+     */
+    fun getBackgroundPath(context: Context): String? {
+        return try {
+            val prefs = open(context) ?: return null
+            prefs.getString(KEY_BACKGROUND_PATH, null)?.takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            Log.w(TAG, "read background_path failed (" + e.javaClass.simpleName + ")")
+            null
+        }
+    }
+
+    fun setBackgroundPath(context: Context, path: String?): Boolean {
+        return try {
+            val prefs = open(context) ?: return false
+            // 用 commit() 而不是 apply()：返回值需要真实的成功/失败，
+            // 而 Editor.apply() 是异步的、恒返回 Unit —— 拿不到结果。
+            // 背景图这种一次性写入，同步落盘的代价可以忽略。
+            val editor = prefs.edit()
+            if (path.isNullOrBlank()) editor.remove(KEY_BACKGROUND_PATH)
+            else editor.putString(KEY_BACKGROUND_PATH, path)
+            editor.commit()
+        } catch (e: Exception) {
+            Log.w(TAG, "write background_path failed (" + e.javaClass.simpleName + ")")
+            false
+        }
+    }
+
     fun getLastSessionId(context: Context): String? {
         return try {
             val prefs = open(context) ?: return null

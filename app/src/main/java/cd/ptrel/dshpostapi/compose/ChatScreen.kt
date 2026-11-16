@@ -36,6 +36,7 @@ import cd.ptrel.dshpostapi.ui.chat.scrollToBottom
 import cd.ptrel.dshpostapi.net.ModelInfo
 import cd.ptrel.dshpostapi.ui.chat.ContextStats
 import cd.ptrel.dshpostapi.ui.chat.InputBar
+import cd.ptrel.dshpostapi.ui.common.AppBackground
 import cd.ptrel.dshpostapi.ui.chat.ChatTopBar
 import cd.ptrel.dshpostapi.ui.chat.MessageList
 import cd.ptrel.dshpostapi.ui.chat.MessageRole
@@ -80,6 +81,8 @@ fun ChatScreen(
     onBack: () -> Unit = {},
     /** 右上新建会话。 */
     onNewChat: () -> Unit = {},
+    /** 自定义背景图路径（v0.12.0），null = 用主题色。与会话列表共享同一个设置。 */
+    backgroundPath: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -199,6 +202,9 @@ fun ChatScreen(
     // 网络层 UiMessage → 渲染层 UiMessage。转换是 O(n)，跟着消息列表走。
     val uiMessages = remember(state.messages) { state.messages.map { it.toChatUi() } }
 
+    // v0.12.0：与会话列表同一套背景（用户设一次，两页都生效）。
+    // 包在 Scaffold 外面：Scaffold 会自己铺底色，包里面等于被盖住。
+    AppBackground(path = backgroundPath) {
     Scaffold(
         topBar = {
             // 用移植来的 ChatTopBar：☰ 标题 ｜ 右侧新建。
@@ -261,6 +267,9 @@ fun ChatScreen(
                     .weight(1f)
                     .fillMaxWidth(),
                 listState = listState,
+                // v0.12.1：只保留「复制」。重新生成/编辑/删除依赖服务端能力，
+                // 而 DSH 的会话日志是追加式的，改删在语义上不成立。
+                showMutatingActions = false,
                 // 底部留给浮层输入栏，否则最后一条永远被压在下面滚不出来。
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                 // 其余回调全部用默认值：本项目暂不支持重新生成/编辑/分叉/朗读。
@@ -310,6 +319,7 @@ fun ChatScreen(
                 onOpenStatsPanel = {},
             )
         }
+    }
     }
 }
 

@@ -651,4 +651,10 @@
     <string name="compat_workspace_pick">选择工作区</string>
     <string name="compat_workspace_loading">正在加载工作区…</string>
     <string name="compat_workspace_empty">还没有任何工作区。请先在完整模式里创建一次会话。</string>
+    <!-- v0.12.0：自定义背景图 -->
+    <string name="compat_menu_background">背景图</string>
+    <string name="compat_background_pick">选择背景图</string>
+    <string name="compat_background_reset">恢复默认背景</string>
+    <string name="compat_background_set">背景已更新</string>
+    <string name="compat_background_failed">背景设置失败，请换一张图片</string>
 </resources>

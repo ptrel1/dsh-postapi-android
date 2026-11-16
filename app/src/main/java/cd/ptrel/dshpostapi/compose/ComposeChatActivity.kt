@@ -90,6 +90,8 @@ class ComposeChatActivity : ComponentActivity() {
                     ChatScreen(
                         viewModel = vm,
                         title = sessionTitle,
+                        // 与会话列表共享同一个背景设置（v0.12.0）。
+                        backgroundPath = cd.ptrel.dshpostapi.AppPrefs.getBackgroundPath(this@ComposeChatActivity),
                         onBack = { finish() },
                         onNewChat = {
                             // 新建会话：复用同一个 Activity，换掉 sessionId 后重建。

@@ -49,6 +49,7 @@ import cd.ptrel.dshpostapi.ui.common.MenuWidth
 import cd.ptrel.dshpostapi.ui.common.SoftShape
 import cd.ptrel.dshpostapi.ui.common.Space
 import cd.ptrel.dshpostapi.ui.common.rememberPressPosition
+import cd.ptrel.dshpostapi.ui.common.AppBackground
 import cd.ptrel.dshpostapi.ui.theme.LocalChatColors
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -93,15 +94,25 @@ fun SessionsScreen(
     onSwitchMode: () -> Unit,
     onCheckUpdate: () -> Unit,
     onLogout: () -> Unit,
+    /** 选背景图（v0.12.0）。由 Activity 负责选择器与落盘。 */
+    onPickBackground: () -> Unit = {},
+    /** 自定义背景图路径（v0.12.0），null = 用主题色。 */
+    backgroundPath: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalChatColors.current
     var menuOpen by remember { mutableStateOf(false) }
 
+    // v0.12.0：整页包一层 AppBackground ——
+    // 用户设了背景图就贴图 + 遮罩，没设就退回主题纯色。
+    // 包在最外层而不是给 Column 加 modifier：图片要盖满整屏（含状态栏下方），
+    // 而 Column 只占 Scaffold 给的内容区。
+    AppBackground(path = backgroundPath) {
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(colors.pageBackground),
+            // 有背景图时 Column 自己不再铺底色，否则会把图盖住。
+            .then(if (backgroundPath.isNullOrBlank()) Modifier.background(colors.pageBackground) else Modifier),
     ) {
         // ── 顶栏 ────────────────────────────────────────────────
         Row(
@@ -144,6 +155,12 @@ fun SessionsScreen(
                     AppMenuItem(Res.get(R.string.compat_menu_check_update), AppIcons.Refresh) {
                         menuOpen = false
                         onCheckUpdate()
+                    }
+                    // v0.12.0：自定义背景图。放在检查更新之后、分隔线之前 ——
+                    // 它和上面两项同属「设置类」，分隔线之下只留危险操作（退出登录）。
+                    AppMenuItem(Res.get(R.string.compat_menu_background), AppIcons.Image) {
+                        menuOpen = false
+                        onPickBackground()
                     }
                     // 分隔线固定接在危险操作之前 —— 结构不随数据变化。
                     AppMenuDivider()
@@ -306,6 +323,7 @@ fun SessionsScreen(
                 selected = true,
             )
         }
+    }
     }
 }
 

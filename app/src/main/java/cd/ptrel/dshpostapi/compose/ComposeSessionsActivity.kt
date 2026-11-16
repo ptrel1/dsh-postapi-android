@@ -5,6 +5,12 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.padding
@@ -95,6 +101,34 @@ class ComposeSessionsActivity : ComponentActivity() {
                     redirectToLogin()
                 }
 
+                // ---- 自定义背景图（v0.12.0）----
+                // 用 mutableStateOf 而不是直接读 AppPrefs：选择后要立刻重组出新背景，
+                // 重启 App 才生效的话用户会以为没成功。
+                var backgroundPath by remember { mutableStateOf(AppPrefs.getBackgroundPath(this@ComposeSessionsActivity)) }
+                val scope = rememberCoroutineScope()
+                val pickBackgroundImage = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.GetContent(),
+                ) { uri ->
+                    if (uri == null) return@rememberLauncherForActivityResult
+                    scope.launch {
+                        val saved = withContext(Dispatchers.IO) { saveBackground(uri) }
+                        if (saved != null) {
+                            backgroundPath = saved
+                            Toast.makeText(
+                                this@ComposeSessionsActivity,
+                                getString(R.string.compat_background_set),
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        } else {
+                            Toast.makeText(
+                                this@ComposeSessionsActivity,
+                                getString(R.string.compat_background_failed),
+                                Toast.LENGTH_LONG,
+                            ).show()
+                        }
+                    }
+                }
+
                 var logoutConfirm by remember { mutableStateOf(false) }
 
                 SessionsScreen(
@@ -109,6 +143,8 @@ class ComposeSessionsActivity : ComponentActivity() {
                     onSwitchMode = ::switchToFullMode,
                     onCheckUpdate = { Updates.checkManually(this@ComposeSessionsActivity) },
                     onLogout = { logoutConfirm = true },
+                    backgroundPath = backgroundPath,
+                    onPickBackground = { pickBackgroundImage.launch("image/*") },
                     // safeDrawing 而不是 imePadding：这一页没有输入框，
                     // 但状态栏 / 手势条必须让开，否则顶栏压在状态栏下面。
                     modifier = Modifier.padding(WindowInsets.safeDrawing.asPaddingValues()),
@@ -259,6 +295,40 @@ class ComposeSessionsActivity : ComponentActivity() {
      * 后者会再次读 UI 模式并可能又绕回本页，形成循环。
      * 清栈（NEW_TASK + CLEAR_TASK）：重新登录后不该还能按返回键回到失效的界面。
      */
+    /**
+     * 把用户选的图片复制进 app 私有目录并记下路径（v0.12.0）。
+     *
+     * 为什么复制而不是记 Uri：
+     *   ContentResolver 给的临时读权限只在当前进程/任务存活期内有效，
+     *   重启 App 后 Uri 就打不开了 —— 而背景图是长期设置。
+     *   复制一份到自己目录，权限问题彻底消失。
+     *
+     * 为什么**不**缩放原图：
+     *   用户选的图可能 4000×3000，背景要铺满整屏。
+     *   但 Compose 的 Image + ContentScale.Crop 会按控件尺寸解码采样，
+     *   内存不会按原图大小爆掉；而缩放会损失画质且要处理 EXIF 旋转。
+     *   实测一张 3MB 的手机照片作为背景正常。
+     *
+     * @returns 保存后的绝对路径；失败返回 null（调用方提示用户换一张）。
+     */
+    private fun saveBackground(uri: android.net.Uri): String? {
+        return try {
+            val dir = java.io.File(filesDir, "background")
+            if (!dir.exists() && !dir.mkdirs()) return null
+            // 固定文件名：换背景时覆盖，不会在私有目录里堆一堆旧图。
+            val target = java.io.File(dir, "bg.img")
+            contentResolver.openInputStream(uri)?.use { input ->
+                target.outputStream().use { output -> input.copyTo(output) }
+            } ?: return null
+            // 写进 Prefs 供下次启动直接读；本进程内由 Compose state 接管。
+            AppPrefs.setBackgroundPath(this, target.absolutePath)
+            target.absolutePath
+        } catch (e: Exception) {
+            android.util.Log.w("ComposeSessions", "saveBackground failed: " + e.javaClass.simpleName)
+            null
+        }
+    }
+
     private fun redirectToLogin() {
         startActivity(
             Intent(this, LoginActivity::class.java).apply {

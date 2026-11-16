@@ -107,6 +107,17 @@ fun MessageList(
     onFork: (UiMessage) -> Unit = {},
     onDelete: (UiMessage) -> Unit = {},
     onVariantChange: (UiMessage, Int) -> Unit = { _, _ -> },
+    /**
+     * 是否显示「重新生成 / 编辑 / 删除」三个按钮（v0.12.1）。
+     *
+     * 它们依赖服务端能力：重新生成要重跑一轮、编辑要改历史消息、删除要移出日志。
+     * DSH 的会话日志是**追加式**的，改/删在语义上不成立，官方 Web 也没有这三项。
+     * 传空实现会让按钮渲染出来但点了没反应 —— 那是本项目反复踩过的坑，
+     * 所以这里直接不渲染，而不是留个死按钮。
+     *
+     * 复制是纯客户端操作（系统剪贴板），始终保留。
+     */
+    showMutatingActions: Boolean = true,
     onOpenImage: (UiMessage, Attachment) -> Unit = { _, _ -> },
     onRetry: (UiMessage) -> Unit = {},
     /**
@@ -199,6 +210,7 @@ fun MessageList(
                  * 所以这里只需要通知外层"用户在看东西了，别再跟"，见 [onFoldToggle]。
                  */
                 onFoldToggle = onFoldToggle,
+                showMutatingActions = showMutatingActions,
                 onTogglePeek = {
                     peekedId = if (peekedId == message.id) null else message.id
                 },
@@ -243,6 +255,7 @@ private fun MessageRow(
     onOpenImage: (Attachment) -> Unit,
     onRetry: () -> Unit,
     onFoldToggle: () -> Unit,
+    showMutatingActions: Boolean,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val isUser = message.role == MessageRole.USER
@@ -358,6 +371,7 @@ private fun MessageRow(
                 onEdit = onEdit,
                 onDelete = onDelete,
                 onVariantChange = onVariantChange,
+                showMutatingActions = showMutatingActions,
             )
         }
     }
@@ -799,6 +813,7 @@ private fun MessageActions(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onVariantChange: (Int) -> Unit,
+    showMutatingActions: Boolean,
 ) {
     val colors = LocalChatColors.current
 
@@ -825,7 +840,7 @@ private fun MessageActions(
 
         ActionIcon(AppIcons.Copy, stringResource(R.string.action_copy), onCopy, colors)
         if (message.role == MessageRole.ASSISTANT) {
-            ActionIcon(AppIcons.Refresh, stringResource(R.string.msg_regenerate), onRegenerate, colors)
+            if (showMutatingActions) ActionIcon(AppIcons.Refresh, stringResource(R.string.msg_regenerate), onRegenerate, colors)
             // 续写紧挨着「重新生成」：两者是同一件事的两个方向（重来 / 接着写）
             if (canContinue) {
                 ActionIcon(AppIcons.Play, stringResource(R.string.msg_continue), onContinue, colors)
@@ -841,8 +856,8 @@ private fun MessageActions(
                 )
             }
         }
-        ActionIcon(AppIcons.Edit, stringResource(R.string.action_edit), onEdit, colors)
-        ActionIcon(AppIcons.Trash, stringResource(R.string.action_delete), onDelete, colors)
+        if (showMutatingActions) ActionIcon(AppIcons.Edit, stringResource(R.string.action_edit), onEdit, colors)
+        if (showMutatingActions) ActionIcon(AppIcons.Trash, stringResource(R.string.action_delete), onDelete, colors)
 
         /*
          * 模型名 · token 数 —— **碰一下才出现，就在按钮旁边**。
