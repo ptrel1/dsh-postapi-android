@@ -446,6 +446,96 @@ class CompatApi(
         }
     }
 
+    /**
+     * 观察一个会话（v0.13.0，对应服务端 GET /chat/watch）。
+     *
+     * ## 解决什么问题
+     *
+     * 用户在**网页端**发消息时，App 开着聊天页完全感知不到 ——
+     * 早先只有 onResume 才拉一次历史，页面存活期间外部变化一律看不见。
+     *
+     * ## 为什么不是 /chat/stream
+     *
+     * 那个是「提交 + 观察」一体的：它推进一轮对话。而外部已经在跑的轮次没法接管，
+     * 硬接会让两条流写同一份 state。/chat/watch 是**纯观察**，无副作用。
+     *
+     * ## 帧格式（服务端 v1.13.x）
+     *
+     *   {type:'snapshot', cursor, hasMore}         进入时的游标
+     *   {type:'event', kind, seq, data}            会话事件（用户/助手消息、标题）
+     *   {type:'turn-start', turn, step}            一轮开始
+     *   {type:'text', text}                        正文增量
+     *   {type:'reasoning', text}                   思考增量
+     *   {type:'turn-end', turn}                    一轮结束
+     *   {type:'done', reason}                      整个 turn 结束
+     *   {type:'questions', callId, questions[]}    有人在等回答
+     *   {type:'question-ready', callId}            可以提交答案了
+     *   {type:'error', message}                    观察流本身出错
+     *
+     * @return SSE 请求；调用方负责拿到连接并逐行读取 data: 行。
+     */
+    fun watchRequest(sessionId: String): Request {
+        return Request.Builder()
+            .url(hostBaseUrl.trimEnd('/') + API_PREFIX + "/chat/watch?sessionId=" + java.net.URLEncoder.encode(sessionId, "UTF-8"))
+            .header("Cookie", cookieHeader())
+            .header("User-Agent", MOBILE_UA)
+            .header("Accept", "text/event-stream")
+            .get()
+            .build()
+    }
+
+    /** 回答一个待答问题（对应服务端 POST /chat/answer）。 */
+    fun answerRequest(sessionId: String, callId: String, answers: List<AnswerItem>): Request {
+        val arr = org.json.JSONArray()
+        answers.forEach { a ->
+            arr.put(
+                JSONObject()
+                    .put("id", a.id)
+                    .put("selected", org.json.JSONArray(a.selected))
+                    .apply { if (!a.custom.isNullOrBlank()) put("custom", a.custom) },
+            )
+        }
+        val body = JSONObject()
+            .put("sessionId", sessionId)
+            .put("callId", callId)
+            .put("answers", arr)
+        return Request.Builder()
+            .url(hostBaseUrl.trimEnd('/') + API_PREFIX + "/chat/answer")
+            .header("Cookie", cookieHeader())
+            .header("User-Agent", MOBILE_UA)
+            .post(okhttp3.RequestBody.create(JSON_MEDIA, body.toString()))
+            .build()
+    }
+
+    /**
+     * 提交答案（v0.13.0）。
+     *
+     * 注意 409 的语义：服务端用它表示「这个问题已经不在可答状态」
+     * （另一端先答了、或者服务端重启把它丢了）。这**不是**故障，
+     * 调用方应当关闭回答面板并给用户一句提示，而不是让他重试。
+     */
+    fun execAnswer(req: Request): Result<Unit> = exec(req) { _ -> Unit }
+
+    /** 一条答案：[selected] 是选中的选项标签，[custom] 是「其他」自由文本。 */
+    data class AnswerItem(val id: String, val selected: List<String>, val custom: String? = null)
+
+    /** 服务端推来的待答问题。 */
+    data class PendingQuestion(
+        val callId: String,
+        val questions: List<Question>,
+    ) {
+        /** 单个问题。[options] 为空表示开放式输入（没有可选项）。 */
+        data class Question(
+            val id: String,
+            val question: String,
+            val detail: String?,
+            val header: String?,
+            val multiSelect: Boolean,
+            val options: List<Option>,
+        )
+        data class Option(val label: String, val description: String?)
+    }
+
     fun streamRequest(
         prompt: String,
         sessionId: String?,

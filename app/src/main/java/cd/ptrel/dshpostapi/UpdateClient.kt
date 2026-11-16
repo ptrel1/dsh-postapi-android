@@ -43,11 +43,20 @@ object UpdateClient {
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    /** 检查更新的客户端（v0.12.3）。 */
     private val checkClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
-            .connectTimeout(5, TimeUnit.SECONDS)
-            .readTimeout(5, TimeUnit.SECONDS)
-            .writeTimeout(5, TimeUnit.SECONDS)
+            // 5s 对**首次**建连（DNS + TLS）偏紧，实测「第一次失败、第二次成功」
+            // —— 第二次时连接池里已有活连接。放宽到 10s。
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
+            .writeTimeout(10, TimeUnit.SECONDS)
+            // ⚠️ 这一层**关掉**，重试交给应用层（Updates.attemptFetch）。
+            //
+            // 早先这里开了 true，想着「检查是幂等 GET，重试无副作用」。
+            // 但应用层也有一次重试，两层叠加后最坏是 2×N 次请求、等待时间翻倍 ——
+            // 而超时已经从 5s 放宽到 10s，首次建连那个失败场景应用层重试就够。
+            // 单层重试的另一个好处：失败次数可预期，日志好读。
             .retryOnConnectionFailure(false)
             .build()
     }

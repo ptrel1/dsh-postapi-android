@@ -1,5 +1,8 @@
 package cd.ptrel.dshpostapi.compose
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -84,6 +87,8 @@ fun ChatScreen(
     onNewChat: () -> Unit = {},
     /** 自定义背景图路径（v0.12.0），null = 用主题色。与会话列表共享同一个设置。 */
     backgroundPath: String? = null,
+    /** 提交对外部提问的回答（v0.13.0）。 */
+    onAnswerQuestion: (callId: String, answers: List<cd.ptrel.dshpostapi.CompatApi.AnswerItem>) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -227,6 +232,17 @@ fun ChatScreen(
             )
         },
     ) { padding ->
+        // v0.13.0：外部提问的回答面板。
+        // 叠在 Scaffold 内容之上而不是塞进列表里：它是**阻塞式交互**，
+        // 用户必须先答完才能看到后续内容，塞进列表会被滚走。
+        val pending = state.pendingQuestion
+        if (pending != null) {
+            PendingQuestionDialog(
+                pending = pending,
+                onAnswer = { callId, answers -> onAnswerQuestion(callId, answers) },
+                onDismiss = { onAnswerQuestion(pending.callId, emptyList()) },
+            )
+        }
         Column(
             modifier = modifier
                 .fillMaxSize()
@@ -407,3 +423,131 @@ private fun ChatViewModelMsg.toChatUi(): UiMessage {
 }
 
 private typealias ChatViewModelMsg = NetMessage
+
+/**
+ * 外部提问的回答面板（v0.13.0）。
+ *
+ * ## 为什么用 Dialog 而不是内联卡片
+ *
+ * ask_user_question 是**阻塞式**的：agent 停在工具调用里等回答，不答就不会有后续输出。
+ * 内联卡片会被消息列表滚走，用户看不到「有人在等」。Dialog 保证它始终在视线内。
+ *
+ * ## 多选与开放输入
+ *
+ * · options 为空 → 开放式输入（自由文本），走 custom 字段
+ * · multiSelect = true → 可多选
+ * · 其余 → 单选
+ *
+ * ## 为什么 onDismiss 也提交空答案
+ *
+ * 用户点「关闭」= 拒绝回答。这时必须给服务端一个结果，否则 agent 永远挂着。
+ * 提交空 answers 让服务端按「未作答」处理。
+ */
+@androidx.compose.runtime.Composable
+fun PendingQuestionDialog(
+    pending: cd.ptrel.dshpostapi.CompatApi.PendingQuestion,
+    onAnswer: (String, List<cd.ptrel.dshpostapi.CompatApi.AnswerItem>) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    // 每个问题各自的选择状态：questionId → 选中的标签集合
+    val selections = androidx.compose.runtime.remember(pending.callId) {
+        androidx.compose.runtime.mutableStateMapOf<String, MutableSet<String>>()
+    }
+    // 开放式输入：questionId → 文本
+    val customs = androidx.compose.runtime.remember(pending.callId) {
+        androidx.compose.runtime.mutableStateMapOf<String, String>()
+    }
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            androidx.compose.material3.Text(
+                text = pending.questions.firstOrNull()?.header?.takeIf { it.isNotBlank() } ?: "需要你的回答",
+                style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
+            )
+        },
+        text = {
+            androidx.compose.foundation.layout.Column(
+                modifier = androidx.compose.ui.Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(androidx.compose.foundation.rememberScrollState()),
+                verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp),
+            ) {
+                pending.questions.forEach { q ->
+                    androidx.compose.material3.Text(
+                        text = q.question,
+                        style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+                    )
+                    q.detail?.takeIf { it.isNotBlank() }?.let {
+                        androidx.compose.material3.Text(
+                            text = it,
+                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (q.options.isEmpty()) {
+                        // 开放输入
+                        androidx.compose.material3.OutlinedTextField(
+                            value = customs[q.id] ?: "",
+                            onValueChange = { customs[q.id] = it },
+                            label = { androidx.compose.material3.Text("输入你的回答") },
+                            modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
+                        )
+                    } else {
+                        q.options.forEach { opt ->
+                            val sel = selections.getOrPut(q.id) { mutableSetOf() }
+                            val checked = sel.contains(opt.label)
+                            androidx.compose.foundation.layout.Row(
+                                modifier = androidx.compose.ui.Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        if (q.multiSelect) {
+                                            if (checked) sel.remove(opt.label) else sel.add(opt.label)
+                                        } else {
+                                            sel.clear()
+                                            sel.add(opt.label)
+                                        }
+                                        // 触发重组：mutableStateMapOf 的值是普通 Set，需重新赋值
+                                        selections[q.id] = sel.toMutableSet()
+                                    }
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                            ) {
+                                androidx.compose.material3.Checkbox(checked = checked, onCheckedChange = null)
+                                androidx.compose.material3.Text(
+                                    text = opt.label,
+                                    modifier = androidx.compose.ui.Modifier.padding(start = 8.dp),
+                                )
+                            }
+                            opt.description?.takeIf { it.isNotBlank() }?.let {
+                                androidx.compose.material3.Text(
+                                    text = it,
+                                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = androidx.compose.ui.Modifier.padding(start = 36.dp, bottom = 4.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(
+                onClick = {
+                    val answers = pending.questions.map { q ->
+                        val sel = selections[q.id]?.toList() ?: emptyList()
+                        val custom = customs[q.id]?.takeIf { it.isNotBlank() }
+                        cd.ptrel.dshpostapi.CompatApi.AnswerItem(q.id, sel, custom)
+                    }
+                    onAnswer(pending.callId, answers)
+                },
+            ) { androidx.compose.material3.Text("提交") }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) {
+                androidx.compose.material3.Text("关闭")
+            }
+        },
+    )
+}

@@ -101,6 +101,8 @@ class ComposeChatActivity : ComponentActivity() {
                             // 这里直接重建，栈里不会堆出两个聊天页。
                             recreateWithNewSession()
                         },
+                        // v0.13.0：外部提问的回答提交。
+                        onAnswerQuestion = { callId, answers -> vm.answerQuestion(callId, answers) },
                         modifier = Modifier.padding(padding).fillMaxSize(),
                     )
                 }

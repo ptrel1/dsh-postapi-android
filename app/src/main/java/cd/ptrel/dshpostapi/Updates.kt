@@ -46,6 +46,23 @@ object Updates {
     private const val AUTO_CHECK_MIN_INTERVAL_MS = 30L * 60L * 1000L
 
     /**
+     * 手动检查失败后的重试次数（v0.12.3）。
+     *
+     * 1 次就够：要解决的问题是「首次建连瞬时失败」，第二次用的已经是热连接。
+     * 再多就是拿用户等待时间去赌一个很罕见的情形（服务端连续两次都拒）。
+     */
+    private const val MANUAL_RETRY_COUNT = 1
+
+    /**
+     * 两次尝试之间的等待（v0.12.3）。
+     *
+     * 300ms 的依据：足以让 OkHttp 把刚失败的那条连接从连接池摘掉、
+     * 重新走一次 DNS 缓存 + 建连，又短到用户察觉不到「卡了一下」。
+     * 太长（如 1s+）会让「点了没反应」的观感回来，反而更糟。
+     */
+    private const val RETRY_DELAY_MS = 300L
+
+    /**
      * "会话还没读出来"时的重试延迟表（见 [scheduleRetryForPendingSession]）。
      *
      * v0.4.4：从"单次 800ms"改成"两次（800ms / 1500ms）"。
@@ -275,14 +292,23 @@ object Updates {
             return
         }
         Log.i(TAG, "manual check: start")
+        // 给一个即时反馈（v0.12.3）。
+        // 超时放宽到 10s、失败会静默重试一次，最坏要等 20 秒 ——
+        // 用户点完什么都不发生，会以为按钮坏了并反复点。
+        // 用 SHORT Toast 而不是对话框：检查通常 1 秒内就回来了，
+        // 对话框会闪一下反而更突兀；Toast 2 秒自动消失，不挡结果。
+        Toast.makeText(activity, R.string.update_checking, Toast.LENGTH_SHORT).show()
 
         fetch(
             activity = activity,
             session = session,
             onUnauthorized = { runCatching { AccountStore.clearCookie(activity) } },
+            // v0.12.3：手动检查失败自动再试一次（见 fetch 的注释）。
+            // 只给这一条路径 —— 自动检查是后台顺手做的，多重试一次没意义。
+            retries = MANUAL_RETRY_COUNT,
         ) { owner, info, error ->
             if (error != null) {
-                Log.w(TAG, "manual check failed: " + error.debugText())
+                Log.w(TAG, "manual check failed after retry: " + error.debugText())
                 Toast.makeText(
                     owner,
                     owner.getString(R.string.update_check_failed, error.debugText()),
@@ -355,11 +381,67 @@ object Updates {
      *
      * 401/403 统一在**这里**处理（清掉存储里的 cookie）：与 WebViewActivity.showError
      * 保持同一口径，否则下次启动会命中"cookie 未过期 → 直接进 WebView"的错误分支。
+     *
+     * ## 失败自动重试（v0.12.3）
+     *
+     * 用户实测「手动检查第一次失败、第二次点就成功」：首次建连要做 DNS + TLS 握手，
+     * 在弱网 / 服务刚唤醒时容易超时；第二次连接池里已有活连接，于是成功。
+     * 用户看到的是一次莫名其妙的失败，而实际上什么都没坏。
+     *
+     * 处理分两层：
+     *   · 连接层：[UpdateClient.checkClient] 放宽到 10s + retryOnConnectionFailure(true)；
+     *   · 应用层：就是这里的 [RETRY_DELAY_MS] 后整体重发一次，覆盖连接层也救不回的情形
+     *     （例如服务端 / 反代在冷启动瞬间回了 5xx）。
+     *
+     * ## 为什么重试只给手动路径
+     *
+     * 自动检查（启动 / 登录 / WebView 加载）是**顺手做**的事，用户没有等待它：
+     * 失败就失败，多打一次请求只增加后台噪音，且它的失败本来就是静默的。
+     * 手动检查则相反 —— 用户正盯着屏幕等结果，一次瞬时失败换来一个
+     * 「检查失败」的红色 Toast，体感极差。所以由调用方决定 [retries]。
+     *
+     * ## 重试期间的三条纪律
+     *
+     *   · **不弹任何提示**：中间那次失败对用户不可见，否则等于「先报错再报对」；
+     *   · **不重复 onUnauthorized**：401/403 是凭据问题，重试也不会变；已在第一次处理过，
+     *     再清一次 cookie 只会让「登录成功写进去的新 cookie」被误删（见 checkAfterLogin 的注释，
+     *     那里记录过同一条竞态）；
+     *   · **只重试真正的失败**：`info == null && error != null`。拿到了清单就算成功，
+     *     哪怕清单内容让上层决定"不弹窗"，也不该再请求一次。
+     *
+     * @param retries 首次失败后还允许重试几次。0 = 不重试（自动检查用）。
      */
     private fun fetch(
         activity: Activity,
         session: UpdateSession.Current,
         onUnauthorized: () -> Unit,
+        /** 首次失败后允许的重试次数；0 = 只发一次（自动检查）。 */
+        retries: Int = 0,
+        onDone: (Activity, UpdateInfo?, UpdateError?) -> Unit,
+    ) {
+        attemptFetch(
+            activity = activity,
+            session = session,
+            onUnauthorized = onUnauthorized,
+            retriesLeft = retries,
+            onDone = onDone,
+        )
+    }
+
+    /**
+     * [fetch] 的单次尝试 + 失败后自我调度。
+     *
+     * 抽成独立函数而不是在 onDone 回调里递归调用 fetch：
+     * 重试要把「还剩几次」传递下去，混在业务回调里会让每个调用方都得关心重试状态。
+     *
+     * 用 Handler.postDelayed 而不是阻塞 sleep：这是主线程回调链，
+     * 阻塞会让界面卡住 300ms（哪怕很短，也不该在主线程做）。
+     */
+    private fun attemptFetch(
+        activity: Activity,
+        session: UpdateSession.Current,
+        onUnauthorized: () -> Unit,
+        retriesLeft: Int,
         onDone: (Activity, UpdateInfo?, UpdateError?) -> Unit,
     ) {
         UpdateClient.checkUpdate(
@@ -370,6 +452,35 @@ object Updates {
             if (activity.isFinishing || activity.isDestroyed) {
                 return@checkUpdate
             }
+
+            // 真正的失败 = 既没拿到清单、又有错误。
+            val failed = info == null && error != null
+            if (failed && retriesLeft > 0) {
+                // ⚠️ 这里**不清 cookie、不回调 onDone、不 Toast** ——
+                // 用户不该知道有过这一次失败。
+                Log.w(
+                    TAG,
+                    "update check: first attempt failed (" + error.debugText() +
+                        "), retrying in " + RETRY_DELAY_MS + "ms (remaining=" + retriesLeft + ")",
+                )
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    if (activity.isFinishing || activity.isDestroyed) return@postDelayed
+                    attemptFetch(
+                        activity = activity,
+                        session = session,
+                        onUnauthorized = onUnauthorized,
+                        retriesLeft = retriesLeft - 1,
+                        onDone = onDone,
+                    )
+                }, RETRY_DELAY_MS)
+                return@checkUpdate
+            }
+            if (failed && retriesLeft == 0) {
+                // 走到这里有两种情况：本来就不重试（自动检查），或重试也用完了。
+                // 自动检查的那条路径不该打 "final" —— 它从来没重试过，日志会误导排查。
+                Log.w(TAG, "update check: failed (" + error.debugText() + ")")
+            }
+
             if (error is UpdateError.Http && (error.code == 401 || error.code == 403)) {
                 Log.w(TAG, "update check unauthorized, clearing stored cookie")
                 onUnauthorized()

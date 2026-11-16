@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.Dispatchers
+import cd.ptrel.dshpostapi.CompatApi
 import cd.ptrel.dshpostapi.net.StreamEvent
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -44,6 +45,105 @@ class DshStreamClient(
         // 模型思考几十秒不发一个字节是正常的，读超时 10s 会把它当成断线。
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .build()
+
+    /**
+     * 观察一个会话（v0.13.0，对应 GET /chat/watch）。
+     *
+     * 与 [stream] 的区别：**只读**。它不提交 prompt、不推进轮次，
+     * 只把服务端见到的事件转成帧推回来。用于「网页端在跑，App 同步显示」。
+     *
+     * 返回原始 [WatchFrame] 而不是复用 [StreamEvent]：两者的帧语义不同
+     * （watch 有 text/reasoning/turn-start/questions，stream 有 tool/done/error），
+     * 强行合并会让两边的分支都变得判不准。
+     */
+    fun watch(request: Request): Flow<WatchFrame> = callbackFlow {
+        val call = sseClient.newCall(request)
+        try {
+            val response = call.execute()
+            if (!response.isSuccessful) {
+                trySend(WatchFrame.Failed(if (response.code == 401) "登录已失效，请重新登录" else "HTTP " + response.code))
+                close()
+                return@callbackFlow
+            }
+            val source = response.body?.source()
+            if (source == null) {
+                trySend(WatchFrame.Failed("服务端没有返回内容"))
+                close()
+                return@callbackFlow
+            }
+            while (!source.exhausted()) {
+                val line = source.readUtf8Line() ?: break
+                if (line.isEmpty()) continue
+                if (line.startsWith(":")) continue      // 心跳 / connected
+                if (!line.startsWith("data:")) continue
+                val payload = line.removePrefix("data:").trim()
+                if (payload.isEmpty()) continue
+                parseWatch(payload)?.let { trySend(it) }
+            }
+            close()
+        } catch (e: IOException) {
+            // 主动取消（页面退出/切会话）不是故障，不报错。
+            if (!call.isCanceled()) trySend(WatchFrame.Failed("网络中断：" + (e.message ?: "未知")))
+            close()
+        } catch (e: Exception) {
+            trySend(WatchFrame.Failed("读取失败：" + (e.message ?: e.javaClass.simpleName)))
+            close()
+        }
+        awaitClose {
+            // 关闭时取消底层 call，否则 OkHttp 的连接会挂着不释放。
+            try { call.cancel() } catch (_: Exception) {}
+        }
+    }
+
+    /** 把一帧 JSON 解析成 [WatchFrame]；不认识的类型返回 null（向前兼容）。 */
+    private fun parseWatch(payload: String): WatchFrame? {
+        return try {
+            val o = org.json.JSONObject(payload)
+            when (o.optString("type")) {
+                "snapshot" -> WatchFrame.Snapshot
+                "text" -> o.optString("text").takeIf { it.isNotEmpty() }?.let { WatchFrame.Text(it) }
+                "reasoning" -> o.optString("text").takeIf { it.isNotEmpty() }?.let { WatchFrame.Reasoning(it) }
+                "turn-start" -> WatchFrame.TurnStart
+                "turn-end" -> WatchFrame.TurnEnd
+                "done" -> WatchFrame.Done(o.optString("reason", "complete"))
+                "questions" -> parseQuestions(o)
+                "question-ready" -> WatchFrame.QuestionReady
+                "error" -> WatchFrame.Failed(o.optString("message", "观察流出错"))
+                else -> null
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun parseQuestions(o: org.json.JSONObject): WatchFrame.Questions? {
+        val callId = o.optString("callId")
+        val arr = o.optJSONArray("questions") ?: return null
+        if (callId.isEmpty() || arr.length() == 0) return null
+        val list = ArrayList<CompatApi.PendingQuestion.Question>()
+        for (i in 0 until arr.length()) {
+            val q = arr.optJSONObject(i) ?: continue
+            val opts = ArrayList<CompatApi.PendingQuestion.Option>()
+            q.optJSONArray("options")?.let { oa ->
+                for (j in 0 until oa.length()) {
+                    oa.optJSONObject(j)?.let { opt ->
+                        opts.add(CompatApi.PendingQuestion.Option(opt.optString("label"), opt.optString("description").takeIf { it.isNotEmpty() }))
+                    }
+                }
+            }
+            list.add(
+                CompatApi.PendingQuestion.Question(
+                    id = q.optString("id"),
+                    question = q.optString("question"),
+                    detail = q.optString("detail").takeIf { it.isNotEmpty() },
+                    header = q.optString("header").takeIf { it.isNotEmpty() },
+                    multiSelect = q.optBoolean("multiSelect", false),
+                    options = opts,
+                ),
+            )
+        }
+        return WatchFrame.Questions(CompatApi.PendingQuestion(callId, list))
+    }
 
     /**
      * 发起一轮对话。
@@ -147,4 +247,39 @@ class DshStreamClient(
     private companion object {
         const val TAG = "DshStreamClient"
     }
+}
+
+/**
+ * 观察流（/chat/watch）的一帧。
+ *
+ * 与 [StreamEvent] 分开定义的理由见 [DshStreamClient.watch] 的注释：
+ * 两套帧的语义不同，合并会让两边的判据都变模糊。
+ */
+sealed interface WatchFrame {
+    /** 连接建立，服务端给了进入游标。此时可以拉一次历史补齐。 */
+    data object Snapshot : WatchFrame
+
+    /** 某一轮开始。 */
+    data object TurnStart : WatchFrame
+
+    /** 正文增量。 */
+    data class Text(val text: String) : WatchFrame
+
+    /** 思考增量。 */
+    data class Reasoning(val text: String) : WatchFrame
+
+    /** 某一轮结束。 */
+    data object TurnEnd : WatchFrame
+
+    /** 整个 turn 结束（[reason] 是宿主的结束原因）。 */
+    data class Done(val reason: String) : WatchFrame
+
+    /** 有人在等回答。 */
+    data class Questions(val pending: CompatApi.PendingQuestion) : WatchFrame
+
+    /** 可以提交答案了（服务端确认问题已进入可答状态）。 */
+    data object QuestionReady : WatchFrame
+
+    /** 观察流本身失败（网络 / 鉴权）。 */
+    data class Failed(val message: String) : WatchFrame
 }

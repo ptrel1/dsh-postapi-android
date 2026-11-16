@@ -658,4 +658,5 @@
     <string name="compat_background_set">背景已更新</string>
     <string name="compat_background_failed">背景设置失败，请换一张图片</string>
     <string name="action_copied">已复制</string>
+    <string name="update_checking">正在检查更新…</string>
 </resources>

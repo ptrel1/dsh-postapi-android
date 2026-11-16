@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import cd.ptrel.dshpostapi.CompatApi
 import cd.ptrel.dshpostapi.net.StreamEvent
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -79,12 +80,20 @@ class ChatScreenViewModel(
         val busy: Boolean = false,
         val error: String? = null,
         val sessionId: String? = null,
+        /**
+         * 外部（网页端）发起的、正在等待回答的提问（v0.13.0）。
+         *
+         * 非 null 时 UI 弹出回答面板。用户在 App 里提交后走 /chat/answer。
+         */
+        val pendingQuestion: CompatApi.PendingQuestion? = null,
     )
 
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     private var streamJob: Job? = null
+    /** 观察流（/chat/watch）的作业；换会话或开始发送时取消。 */
+    private var watchJob: Job? = null
     private var seq = 0L
 
     /** 生成本地 id。用自增序号而不是 UUID：可读、可测、排序天然稳定。 */
@@ -96,6 +105,89 @@ class ChatScreenViewModel(
      * 本地回显先行：用户点发送后立刻看到自己的话，否则会以为没发出去。
      * 这是聊天类应用的通用预期，不是可选的优化。
      */
+    /**
+     * 观察外部（网页端）对当前会话的改动（v0.13.0）。
+     *
+     * ## 为什么需要
+     *
+     * 用户可能在网页端和 App 同时看一个会话。早先 App 只在 onResume 拉一次历史，
+     * 页面存活期间完全感知不到外部变化 —— 网页那边已经出完了，App 里还是旧内容。
+     *
+     * ## 什么时候不订阅
+     *
+     * **本端正在流式时不订阅**（[STATE.busy]）：两条流会往同一份 messages 写，
+     * 结果既不是本端也不是外部的版本。本端流式结束后再重新订阅。
+     *
+     * ## 断线重连
+     *
+     * 观察流断掉（网络切换、服务端重启）后等 2 秒重连，只要页面还在、会话没换。
+     * 重连成功会收到 snapshot 帧，此时补拉一次历史 —— 断线期间的内容靠它补齐。
+     */
+    private fun startWatching() {
+        watchJob?.cancel()
+        val sid = _state.value.sessionId ?: return
+        if (_state.value.busy) return
+        watchJob = viewModelScope.launch {
+            var attempt = 0
+            while (true) {
+                val current = _state.value.sessionId ?: break
+                // 会话换了 / 本端开始发消息 → 退出观察
+                if (current != sid) break
+                if (_state.value.busy) { kotlinx.coroutines.delay(1_000); continue }
+                try {
+                    streamClient.watch(api.watchRequest(current)).collect { frame ->
+                        when (frame) {
+                            is WatchFrame.Snapshot -> {
+                                // 连上即补拉：断线期间的内容靠这次补齐。
+                                attempt = 0
+                                reload()
+                            }
+                            is WatchFrame.Text -> {
+                                // 外部在流式输出：追加到「外部消息」占位。
+                                appendExternal(frame.text)
+                            }
+                            is WatchFrame.Done -> reload()
+                            is WatchFrame.Questions -> {
+                                _state.update { it.copy(pendingQuestion = frame.pending) }
+                            }
+                            is WatchFrame.Failed -> { /* 下面统一重连 */ }
+                            else -> Unit
+                        }
+                    }
+                } catch (_: Exception) {
+                    // 观察流异常不影响主功能，静默重连。
+                }
+                if (!isActive) break
+                attempt++
+                kotlinx.coroutines.delay(if (attempt < 3) 2_000L else 10_000L)
+            }
+        }
+    }
+
+    private fun frameText(f: WatchFrame.Text): String = f.text
+
+    /** 追加到「外部流式消息」；没有就创建一条。 */
+    private fun appendExternal(text: String) {
+        _state.update { st ->
+            val list = st.messages
+            val last = list.lastOrNull()
+            if (last != null && last.id == "__external__" && last.status == NetMessage.Status.Streaming) {
+                st.copy(messages = list.dropLast(1) + last.copy(text = last.text + text))
+            } else if (text.isNotEmpty()) {
+                st.copy(
+                    messages = list + NetMessage(
+                        "__external__",
+                        NetMessage.Role.Assistant,
+                        text,
+                        status = NetMessage.Status.Streaming,
+                    ),
+                )
+            } else {
+                st
+            }
+        }
+    }
+
     fun send(text: String, images: List<CompatApi.PendingImage> = emptyList()) {
         val trimmed = text.trim()
         // v0.11.0：允许「只发图片不打字」——与宿主 hasPromptContent 的判据一致。
@@ -241,6 +333,32 @@ class ChatScreenViewModel(
                     _state.update { it.copy(error = result.reason) }
                 }
             }
+            // v0.13.0：历史加载完成后开始观察外部改动。
+            // 放在这里而不是函数开头：观察流的 snapshot 帧会触发一次 reload，
+            // 若此时首次历史还没加载完，两次加载会互相覆盖。
+            startWatching()
+        }
+    }
+
+    /**
+     * 提交对外部提问的回答（v0.13.0）。
+     *
+     * 回答成功后立刻清掉 [UiState.pendingQuestion] 让面板关闭；
+     * 服务端返回 409 表示「另一客户端已经答过了」—— 同样关面板，
+     * 但要给用户一句提示，否则他会以为自己的选择生效了。
+     */
+    fun answerQuestion(callId: String, answers: List<CompatApi.AnswerItem>) {
+        val sid = _state.value.sessionId ?: return
+        viewModelScope.launch {
+            val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                api.execAnswer(api.answerRequest(sid, callId, answers))
+            }
+            _state.update { it.copy(pendingQuestion = null) }
+            if (result is CompatApi.Result.Err) {
+                // 不阻塞界面：错误用 error 字段展示（页面已有的错误条）。
+                _state.update { it.copy(error = result.reason) }
+            }
+            // 回答后服务端会继续这一轮，观察流会推后续内容，无需手动 reload。
         }
     }
 
