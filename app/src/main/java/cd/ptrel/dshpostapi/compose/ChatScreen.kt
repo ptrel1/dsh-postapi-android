@@ -19,6 +19,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import cd.ptrel.dshpostapi.ui.chat.followBottom
+import cd.ptrel.dshpostapi.ui.chat.rememberIsAtBottom
 import cd.ptrel.dshpostapi.net.ModelInfo
 import cd.ptrel.dshpostapi.ui.chat.ContextStats
 import cd.ptrel.dshpostapi.ui.chat.InputBar
@@ -60,12 +62,25 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     var input by remember { mutableStateOf("") }
 
-    // 新消息到达时贴底。用 size 而不是内容变化：
-    // 流式增量会疯狂触发，每次都滚会跟用户的主动上滑打架。
-    LaunchedEffect(state.messages.size) {
-        if (state.messages.isNotEmpty()) {
-            listState.animateScrollToItem(state.messages.lastIndex)
-        }
+    // ---- 贴底跟随（v0.10.1 修正）----
+    //
+    // ⚠️ 早先只监听 messages.size —— 流式增量**不改变条数**（只改最后一条的
+    //    text），所以永远不触发，用户看到内容在长但屏不动，得自己往下滑。
+    //
+    // 现在监听「最后一条的内容长度」：新消息、以及流式追加都会变。
+    // 用长度而不是整个 text：字符串比较是 O(n)，长度是 O(1)，而截断/改写
+    // 在流式场景不存在（只会追加），长度变化已足够触发。
+    val lastMessageLen = state.messages.lastOrNull()?.text?.length ?: 0
+    val isAtBottom by rememberIsAtBottom(listState)
+
+    LaunchedEffect(state.messages.size, lastMessageLen) {
+        if (state.messages.isEmpty()) return@LaunchedEffect
+        // 用户主动上滑看历史时不要抢着滚回去 —— 那是「跟随」与「打扰」的分界。
+        // isAtBottom 为 false 说明用户已经在别处读了，新内容不该把他拽回来。
+        if (!isAtBottom) return@LaunchedEffect
+        // followBottom 每帧吃掉剩余距离的 0.7（见 ScrollToBottom.kt 的长注释）：
+        // 内容每 50ms 离散来一批，直接 scrollToItem 会变成「每 50ms 跳一个台阶」。
+        listState.followBottom()
     }
 
     // 网络层 UiMessage → 渲染层 UiMessage。转换是 O(n)，跟着消息列表走。
@@ -121,6 +136,10 @@ fun ChatScreen(
                 // 显示一个点了没反应的按钮比不显示更糟。
                 canAttach = false,
                 onAttachClick = {},
+                // 对话设置 / 思考档位 / 模型选择都是 SimpleChat 的概念，
+                // DSH 侧由服务端决定，客户端没有对应面板。
+                // 早先传空 lambda 导致按钮渲染出来但点了没反应（用户反馈)。
+                showSettingsEntries = false,
                 // DSH 不暴露上下文占用统计，给零值占位（圆环画成空的，不误导）。
                 contextStats = EMPTY_CONTEXT_STATS,
                 statsPanelOpen = false,

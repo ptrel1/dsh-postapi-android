@@ -105,6 +105,17 @@ fun InputBar(
     onStop: () -> Unit,
     /** 附件入口是否显示。关掉是为了不给"点了没反应"的控件留位置。 */
     canAttach: Boolean = true,
+    /**
+     * 是否显示「对话设置」与「思考/搜索」入口（v0.10.1）。
+     *
+     * 这两个入口打开的是 SimpleChat 自己的面板（模型选择、思考档位、联网搜索）。
+     * DSH 侧这些都由服务端决定，客户端没有对应概念 ——
+     * 显示出来只会是「点了没反应」。
+     *
+     * 教训：控件不可用就不要渲染。空 onClick 比隐藏更糟 ——
+     * 用户会反复点、怀疑 App 坏了，而隐藏是明确的「这里没有这个功能」。
+     */
+    showSettingsEntries: Boolean = true,
     /** 点 ⊕：由调用方展开附件面板（图片 / 纯文本文件）。 */
     onAttachClick: () -> Unit,
     /** 附件面板是否展开 —— 决定 ⊕ 要不要转成 ✕。 */
@@ -348,7 +359,7 @@ fun InputBar(
 
                 // ── 对话设置 ─────────────────────────────
                 // 与右侧思考入口同一套样式：灰图标 + 描边；展开时换品牌色底
-                IconCircleButton(
+                if (showSettingsEntries) IconCircleButton(
                     icon = AppIcons.Settings,
                     contentDescription = stringResource(R.string.input_settings),
                     onClick = onOpenSettingsPanel,
@@ -376,7 +387,8 @@ fun InputBar(
                 )
 
                 // ── 思考档位 + 模型 ───────────────────────
-                ThinkingToggle(
+                // 同设置入口：DSH 没有思考档位/模型选择概念，隐藏而不是留个死按钮。
+                if (showSettingsEntries) ThinkingToggle(
                     enabled = thinkingEnabled || webSearchEnabled,
                     expanded = thinkingPanelOpen,
                     onClick = onOpenThinkingPanel,

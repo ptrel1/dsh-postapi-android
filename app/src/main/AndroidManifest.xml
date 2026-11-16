@@ -69,8 +69,17 @@
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
             android:exported="false" />
 
+        <!-- v0.11.0：兼容模式会话列表（Compose 版）。不导出 —— 只有登录后由 CompatActivity 拉起。 -->
+        <activity
+            android:name=".compose.ComposeSessionsActivity"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
+            android:exported="false" />
+
         <!-- v0.5.0：兼容模式入口（当前为占位页）。同 ModeSelectActivity，不导出。 -->
         <!-- v0.6.0：兼容模式的会话列表与聊天页。都不导出。 -->
+        <!-- ⚠️ v0.11.0：下面 CompatSessionsActivity / CompatChatActivity 两项是 XML 版实现，
+             已不再是入口（入口改为 .compose.ComposeSessionsActivity）。
+             保留作为真机验证前的回退点；删之前先确认 Compose 版在真机上跑通。 -->
         <activity
             android:name=".CompatSessionsActivity"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"

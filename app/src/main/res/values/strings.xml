@@ -638,4 +638,12 @@
     <string name="mermaid_loading">图表生成中…</string>
     <string name="settings_export_archive">导出全部对话（ZIP 归档）</string>
     <string name="settings_export_archive_summary">包含所有对话与附件的完整备份，另附每个对话的 Markdown 文稿；可直接用于导入恢复。</string>
+
+    <!-- v0.10.1：兼容模式的「更多」菜单 -->
+    <string name="compat_menu_more">更多</string>
+    <string name="compat_menu_switch_mode">切换使用方式</string>
+    <string name="compat_menu_check_update">检查更新</string>
+    <string name="compat_menu_logout">退出登录</string>
+    <string name="compat_menu_logout_confirm">退出后需要重新输入账号密码。确定吗？</string>
+    <string name="compat_menu_cancel">取消</string>
 </resources>

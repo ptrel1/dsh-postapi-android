@@ -32,7 +32,7 @@ class ComposeProbeActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme {
+            cd.ptrel.dshpostapi.ui.theme.SimpleChatTheme {
                 Scaffold { padding ->
                     ProbeScreen(Modifier.padding(padding))
                 }

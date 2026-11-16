@@ -25,7 +25,9 @@ class CompatActivity : AppCompatActivity() {
         //   · 兼容模式的入口在 App 里有四五处（登录页、模式对话框、抽屉、CompatActivity 自身），
         //     它们都指向 CompatActivity；把这层留着，改模式内部结构时不用动所有入口。
         //   · 将来若要加"兼容模式的引导页/协议页"，插在这里最自然。
-        startActivity(android.content.Intent(this, CompatSessionsActivity::class.java))
+        // v0.11.0：会话列表已换成 Compose 实现。旧 XML 版 CompatSessionsActivity
+        // 仍保留在仓库与 manifest 里（真机验证前的回退点），但不再是入口。
+        startActivity(android.content.Intent(this, cd.ptrel.dshpostapi.compose.ComposeSessionsActivity::class.java))
         finish()
         return
 

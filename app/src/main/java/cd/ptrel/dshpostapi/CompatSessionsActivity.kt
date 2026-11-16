@@ -57,6 +57,13 @@ class CompatSessionsActivity : AppCompatActivity() {
         binding.refreshSessions.setOnClickListener { load() }
         binding.newSession.setOnClickListener { openChat(null, null) }
 
+        // v0.10.1：「更多」菜单（与完整模式右侧三点按钮对齐）。
+        //
+        // 为什么兼容模式也需要：切换使用方式、检查更新、退出登录
+        // 这三件事在两种模式下都该可达。早先兼容模式没有入口，
+        // 用户想切回完整模式只能先去完整模式找抽屉 —— 逻辑上是个死循环。
+        binding.compatMoreButton.setOnClickListener { showCompatMenu() }
+
         load()
     }
 
@@ -127,6 +134,91 @@ class CompatSessionsActivity : AppCompatActivity() {
     private fun showError(msg: String) {
         binding.sessionsError.text = msg
         binding.sessionsError.visibility = View.VISIBLE
+    }
+
+    /**
+     * 兼容模式的「更多」菜单。
+     *
+     * 用 AlertDialog 的列表而不是自绘抽屉：
+     *   · 只有 3 项，自绘抽屉的展开/收起/点外关闭/返回键拦截都是额外状态；
+     *   · AlertDialog 自带这些行为，且系统主题保证深色模式下可读。
+     *
+     * 与完整模式的抽屉相比少了「桌面版/移动版」与「诊断模式」——
+     * 那两项只对 WebView 有意义，原生界面没有对应概念。
+     */
+    private fun showCompatMenu() {
+        val items = arrayOf(
+            getString(R.string.compat_menu_switch_mode),
+            getString(R.string.compat_menu_check_update),
+            getString(R.string.compat_menu_logout),
+        )
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(R.string.compat_menu_more)
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> switchToFullMode()
+                    1 -> checkUpdate()
+                    2 -> confirmLogout()
+                }
+            }
+            .setNegativeButton(R.string.compat_menu_cancel, null)
+            .show()
+    }
+
+    /**
+     * 切回完整模式。
+     *
+     * 与 WebViewActivity.relaunchIntoMode 做同一件事，但入口在兼容模式：
+     * 记住模式偏好，然后进 WebViewActivity 并带上 resume 标志 ——
+     * 不带它会被 onCreate 的 `if (!resumeMode && cookieName.isEmpty()) finish()` 挡回去。
+     */
+    private fun switchToFullMode() {
+        AppPrefs.setUiMode(this, AppPrefs.UI_MODE_FULL)
+        val account = AccountStore.load(this)
+        val host = account?.host.orEmpty()
+        if (host.isEmpty()) {
+            // 凭据丢了：与其带着空地址启动再被 finish 掉，不如回登录页。
+            startActivity(Intent(this, LoginActivity::class.java))
+            finish()
+            return
+        }
+        startActivity(
+            Intent(this, WebViewActivity::class.java).apply {
+                putExtra(WebViewActivity.EXTRA_LAUNCH_URL, host)
+                putExtra(WebViewActivity.EXTRA_RESUME_MODE, true)
+                putExtra(WebViewActivity.EXTRA_HOST, host)
+            },
+        )
+        finish()
+    }
+
+    /**
+     * 检查更新。
+     *
+     * 直接复用 WebViewActivity 的更新链路会牵出整个 Activity 上下文，
+     * 这里简化为跳转到完整模式的更新入口 —— 版本检查是一次性动作，
+     * 没必要为它在兼容模式里再实现一遍。
+     */
+    private fun checkUpdate() {
+        switchToFullMode()
+    }
+
+    /** 退出登录：清凭据 → 回登录页。 */
+    private fun confirmLogout() {
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setMessage(R.string.compat_menu_logout_confirm)
+            .setPositiveButton(R.string.compat_menu_logout) { _, _ ->
+                AccountStore.clearAll(this)
+                AppPrefs.setLastSessionId(this, null)
+                startActivity(
+                    Intent(this, LoginActivity::class.java).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                    },
+                )
+                finish()
+            }
+            .setNegativeButton(R.string.compat_menu_cancel, null)
+            .show()
     }
 
     private fun openChat(sessionId: String?, title: String?) {

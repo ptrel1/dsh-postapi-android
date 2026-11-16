@@ -12,6 +12,19 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+/**
+ * CompatApi.Message → NetMessage。
+ *
+ * openSession 与 reload 都要做同一件事，抽出来避免两处逻辑漂移
+ * （一处改了字段另一处忘了，表现为「重进有内容、刷新没内容」这类诡异现象）。
+ */
+private fun CompatApi.Message.toDisplay(): NetMessage = NetMessage(
+    id = "h-" + seq + "-" + role,
+    role = if (role == "user") NetMessage.Role.User else NetMessage.Role.Assistant,
+    text = text,
+    status = NetMessage.Status.Done,
+)
+
 /** 界面上的一条消息（UI 模型，与网络 DTO 分开）。 */
 data class NetMessage(
     /** 稳定 id：Compose 的 LazyColumn 靠它做 key，没有稳定 key 会整列表重组。 */
@@ -142,6 +155,41 @@ class ChatScreenViewModel(
     }
 
     /** 读某个会话的历史（进入会话时调用）。 */
+    /**
+     * 重新拉取当前会话的历史（v0.10.1）。
+     *
+     * 用途：从后台切回来、或从别的设备/网页聊过之后，用户期望看到最新内容。
+     * 早先只在 openSession 时加载一次 —— 停在聊天页期间服务端的更新永远看不到，
+     * 必须退出重进才刷新，用户体感是「消息不更新」。
+     *
+     * 与 openSession 的差别：**不清空现有消息**。清空会让界面闪白一帧，
+     * 而且流式中的内容会被抹掉。这里只把服务端的新结果替换进去。
+     *
+     * 流式中不刷新：那会和正在进行的 SSE 增量打架（同一轮内容被两处写）。
+     */
+    fun reload() {
+        val sid = _state.value.sessionId ?: return
+        if (_state.value.busy) return
+        viewModelScope.launch {
+            val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                api.history(sid)
+            }
+            if (result is CompatApi.Result.Ok) {
+                _state.update { st ->
+                    // 只有条数变多或最后一条内容变了才替换 —— 避免无意义的重绘。
+                    val incoming = result.value.messages
+                    if (incoming.size == st.messages.size &&
+                        incoming.lastOrNull()?.text == st.messages.lastOrNull()?.text
+                    ) {
+                        st
+                    } else {
+                        st.copy(messages = incoming.map { it.toDisplay() })
+                    }
+                }
+            }
+        }
+    }
+
     fun openSession(sessionId: String) {
         // 进入会话即记为「上次活跃」—— 用户下次打开 App 应该回到这里。
         cd.ptrel.dshpostapi.AppPrefs.setLastSessionId(appContext, sessionId)

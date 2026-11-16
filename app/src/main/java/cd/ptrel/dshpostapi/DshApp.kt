@@ -33,6 +33,13 @@ class DshApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+
+        // v0.10.1：移植来的 UI 代码用 data.Res 取非 composable 文案，必须先 init。
+        // 漏了它的现象是**一进页面就崩**：
+        //   IllegalStateException: Res 还没 init —— Application.onCreate 里漏了 Res.init(this)
+        // 这条来自 SimpleChat 的既有约定，移植时容易漏 —— 它不报编译错，只在运行时炸。
+        cd.ptrel.dshpostapi.data.Res.init(this)
+
         try {
             IO.execute { AccountStore.warmUp(this) }
         } catch (e: Exception) {

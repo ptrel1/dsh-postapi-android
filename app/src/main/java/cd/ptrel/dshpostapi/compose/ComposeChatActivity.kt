@@ -5,8 +5,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import cd.ptrel.dshpostapi.ui.theme.SimpleChatTheme
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -30,6 +30,16 @@ import cd.ptrel.dshpostapi.CompatApi
  */
 class ComposeChatActivity : ComponentActivity() {
 
+    /**
+     * 当前 ViewModel 引用（v0.10.1）。
+     *
+     * 为什么需要提到字段：onResume 里要触发 reload()，而它是 Compose 树里
+     * 通过 viewModel() 拿到的局部变量。提到字段是拿到它的最小改动 ——
+     * 另一条路是把 onResume 的逻辑也搬进 Compose（用 LifecycleEventObserver），
+     * 但那要多一个组合项，且与 Activity 生命周期混在一起更难读。
+     */
+    private var chatViewModel: ChatScreenViewModel? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -51,7 +61,11 @@ class ComposeChatActivity : ComponentActivity() {
         val streamClient = DshStreamClient(okHttpOf(api))
 
         setContent {
-            MaterialTheme {
+            // v0.10.1：改用移植来的 SimpleChatTheme（默认 ThemeMode.SYSTEM = 跟随系统）。
+            // 早先是裸 MaterialTheme{} —— 它不带 colorScheme，等于永远用浅色默认值，
+            // 因此系统开深色时界面仍是白底。这是个很容易漏的点：
+            // MaterialTheme() 无参调用是**合法**的，不报错，只是不跟随系统。
+            SimpleChatTheme {
                 // 用 viewModel() 拿实例：它随 Activity 的 ViewModelStore 走，
                 // 转屏/进程重建时状态不丢（旧 XML 版是自己 new 的，转屏就丢消息）。
                 val vm: ChatScreenViewModel = viewModel(
@@ -62,6 +76,7 @@ class ComposeChatActivity : ComponentActivity() {
                         }
                     },
                 )
+                chatViewModel = vm
                 androidx.compose.runtime.LaunchedEffect(sessionId) {
                     if (!sessionId.isNullOrEmpty()) vm.openSession(sessionId)
                 }
@@ -70,6 +85,22 @@ class ComposeChatActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * 回到前台时刷新一次历史（v0.10.1）。
+     *
+     * 为什么需要：早先只在 openSession 时加载一次。用户在别的设备或网页端
+     * 聊过之后回到 App，看不到新内容 —— 必须退出聊天页再进才刷新，
+     * 体感是「消息不更新」。
+     *
+     * 不做节流：history 读的是本地会话日志（不是网络请求），很轻；
+     * onResume 也不会高频触发。ViewModel 内部的 reload 还会比对内容，
+     * 没变化就不重绘。
+     */
+    override fun onResume() {
+        super.onResume()
+        chatViewModel?.reload()
     }
 
     /**

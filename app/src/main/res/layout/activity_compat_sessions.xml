@@ -42,6 +42,25 @@
             android:layout_height="wrap_content"
             android:minWidth="0dp"
             android:text="@string/compat_refresh" />
+
+        <!--
+          v0.10.1：「更多」菜单入口（与完整模式右侧那个三点按钮对齐）。
+
+          为什么兼容模式也需要它：
+            切换使用方式、检查更新、退出登录 —— 这三件事在两种模式下都该可达。
+            早先兼容模式的用户想切回完整模式，只能去完整模式里找那个抽屉，
+            逻辑上是死循环（我在兼容模式，怎么去完整模式的菜单里切回完整模式）。
+
+          content-desc 写「更多」而不是空：读屏用户靠它识别这个无文字按钮。
+        -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/compatMoreButton"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="0dp"
+            android:contentDescription="@string/compat_menu_more"
+            android:text="⋮" />
     </LinearLayout>
 
     <!-- 空态：没有会话 / 还没加载出来 -->
