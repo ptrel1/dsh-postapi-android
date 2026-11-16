@@ -26,6 +26,7 @@ import cd.ptrel.dshpostapi.ui.chat.scrollToBottom
 import cd.ptrel.dshpostapi.net.ModelInfo
 import cd.ptrel.dshpostapi.ui.chat.ContextStats
 import cd.ptrel.dshpostapi.ui.chat.InputBar
+import cd.ptrel.dshpostapi.ui.chat.ChatTopBar
 import cd.ptrel.dshpostapi.ui.chat.MessageList
 import cd.ptrel.dshpostapi.ui.chat.MessageRole
 import cd.ptrel.dshpostapi.ui.chat.MessageStatus
@@ -58,6 +59,17 @@ import cd.ptrel.dshpostapi.ui.chat.UiMessage
 @Composable
 fun ChatScreen(
     viewModel: ChatScreenViewModel,
+    /**
+     * 顶部标题 = 当前会话名称（v0.10.3）。
+     *
+     * 从会话列表传进来，而不是在这里再请求一次 —— 列表已经有标题了，
+     * 多一次请求既慢又可能拿到不同的值（列表缓存 vs 服务端最新）。
+     */
+    title: String = "",
+    /** 左上返回：回会话列表。 */
+    onBack: () -> Unit = {},
+    /** 右上新建会话。 */
+    onNewChat: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -108,7 +120,20 @@ fun ChatScreen(
     // 网络层 UiMessage → 渲染层 UiMessage。转换是 O(n)，跟着消息列表走。
     val uiMessages = remember(state.messages) { state.messages.map { it.toChatUi() } }
 
-    Scaffold { padding ->
+    Scaffold(
+        topBar = {
+            // 用移植来的 ChatTopBar：☰ 标题 ｜ 右侧新建。
+            // 早先这一页**没有任何顶栏** —— 用户进了会话就出不去（只能按系统返回键），
+            // 也看不到自己在哪个会话里。
+            ChatTopBar(
+                title = title,
+                // onMenu 在这里等价于「返回会话列表」：DSH 没有抽屉，
+                // 会话列表就是上一级。图标沿用它原来的 Menu（☰），语义也对得上。
+                onMenu = onBack,
+                onNewChat = onNewChat,
+            )
+        },
+    ) { padding ->
         Column(
             modifier = modifier
                 .fillMaxSize()

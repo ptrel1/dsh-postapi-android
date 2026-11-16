@@ -394,7 +394,10 @@ fun InputBar(
                     onClick = onOpenThinkingPanel,
                 )
                 // ── 上下文占用 ────────────────────────────
-                ContextMeterPill(
+                // 同设置入口：DSH 不暴露上下文占用统计，传零值只会画出一个永远空的圆环，
+                // 点了也打不开面板（onOpenStatsPanel 是空实现）。
+                // 与 showSettingsEntries 共用一个开关 —— 它们都是「SimpleChat 有、DSH 没有」的概念。
+                if (showSettingsEntries) ContextMeterPill(
                     stats = contextStats,
                     expanded = statsPanelOpen,
                     onClick = onOpenStatsPanel,

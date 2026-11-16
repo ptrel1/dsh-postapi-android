@@ -211,6 +211,8 @@ class CompatApi(
             .build()
         return exec(req) { body ->
             val arr = body.optJSONArray("items") ?: org.json.JSONArray()
+            // TEMP DIAG：确认服务端到底返回了多少条
+            Log.i("CompatApi", "sessions: items=" + arr.length())
             val out = ArrayList<SessionRow>(arr.length())
             for (i in 0 until arr.length()) {
                 val o = arr.optJSONObject(i) ?: continue

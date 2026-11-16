@@ -65,17 +65,19 @@ class SessionsViewModel(
      * 另一个会话在后台跑完了 / 有新消息了，列表**完全不会变** ——
      * 必须退出重进才看得到。读屏用户尤其明显：他不知道有东西变了。
      *
-     * 间隔 5 秒的取舍：
-     *   · 这个接口读的是 s.list({})（服务端内存里的摘要），很轻；
-     *   · 1 秒太频繁，用户看不出区别却持续耗电；
-     *   · 10 秒以上，一轮对话结束了列表还没反映过来，显得迟钝。
+     * 间隔改成 15 秒（v0.10.3）：
+     *   · 实测服务端 0.12~0.46s / 46KB per call（334 个会话）；
+     *   · 5 秒那份开销对「看别的会话跑完」这个需求**过于敏感** ——
+     *     用户感知不到 5 秒与 15 秒的差别，但请求量差 3 倍；
+     *   · 多设备同时开着时是线性叠加，间隔越短越容易把机器拖住。
+     * 真需要即时感的话，正确做法是长连接推送，而不是缩短轮询周期。
      *
      * 用 viewModelScope：ViewModel 销毁（离开页面）时自动取消，不用手写清理。
      */
     private fun startAutoRefresh() {
         viewModelScope.launch {
             while (true) {
-                kotlinx.coroutines.delay(5_000)
+                kotlinx.coroutines.delay(15_000)
                 // 静默刷新：不置 loading（那会让界面闪一下加载圈），
                 // 不动 error（偶发失败不该把已有列表打成错误态）。
                 load(silent = true)
@@ -91,16 +93,33 @@ class SessionsViewModel(
      * （聊天页踩过同一个坑，见 ChatScreenViewModel.openSession）。
      */
     fun load(silent: Boolean = false) {
-        _state.update { it.copy(loading = it.sessions.isEmpty()) }
+        // silent 不置 loading：轮询时让界面闪一下加载圈是最刺眼的那种抖动。
+        if (!silent) _state.update { it.copy(loading = it.sessions.isEmpty()) }
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) { api.listSessions() }
             when (result) {
                 is CompatApi.Result.Ok -> _state.update {
-                    it.copy(
-                        sessions = result.value,
-                        loading = false,
-                        error = null,
-                    )
+                    // v0.10.3：内容没变就**不派发新值**。
+                    //
+                    // 5 秒轮询每次都会拿到 334 条全新对象（JSON 反序列化出来的），
+                    // 直接 copy(sessions = new) 会让 StateFlow 派发新引用 ⇒
+                    // LazyColumn 认为所有 item 都变了 ⇒ 全量重组。
+                    // 实测低端机上是明显掉帧，而绝大部分轮询的结果和上一次一模一样。
+                    //
+                    // 判据用「条数 + 每条的 id/标题/时间/运行态」的等价性：
+                    // 这些都是会变且影响显示的字段；cwd 不会变，不必比。
+                    val incoming = result.value
+                    val same = it.sessions.size == incoming.size &&
+                        it.sessions.indices.all { i ->
+                            val a = it.sessions[i]
+                            val b = incoming[i]
+                            a.sessionId == b.sessionId &&
+                                a.title == b.title &&
+                                a.updatedAt == b.updatedAt &&
+                                a.running == b.running
+                        }
+                    if (same) it.copy(loading = false, error = null)
+                    else it.copy(sessions = incoming, loading = false, error = null)
                 }
                 is CompatApi.Result.Err -> {
                     _state.update { it.copy(loading = false, error = result.reason) }

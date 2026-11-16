@@ -23,8 +23,10 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -199,6 +201,11 @@ fun SessionsScreen(
                 // 作用域（它是 LazyListScope），remember 放进去会报
                 // 「@Composable invocations can only happen from a @Composable function」。
                 val groups = remember(state.sessions) { state.sessions.groupByWorkspace() }
+                // 折叠状态集中管在一个 map 里，而不是每组一个 remember ——
+                // LazyListScope 内不是 @Composable 作用域，remember 放进去编译不过
+                // （这一处踩了两次，记下来）。
+                // 默认空 map ⇒ 全部收起。
+                val expandedPaths = remember { mutableStateMapOf<String, Boolean>() }
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -217,11 +224,29 @@ fun SessionsScreen(
                     // 30 个会话平铺时用户找「上次在某个项目里干到哪了」只能靠标题猜。
                     // 分组后：组标题是项目名，组内按时间倒序，组间按最近活动倒序。
                     groups.forEach { group ->
+                        // v0.10.3：分组默认**收起**。
+                        //
+                        // 为什么要收起：64 个会话全展开时，用户要滑很久才能看到
+                        // 第二个工作区。列表页的第一职责是「让我找到那个项目」，
+                        // 不是「把所有会话摊开」。
+                        //
+                        // 为什么记在 remember 里而不是持久化：折叠状态是**浏览时的临时意图**，
+                        // 下次打开时「都是收起的」才是可预期的起点。
+                        // 用 path 作 key：同名项目（不同目录）各自独立折叠。
+                        val expanded = expandedPaths[group.path] == true
                         item(key = "hdr-" + group.path) {
-                            WorkspaceHeader(group)
+                            WorkspaceHeader(
+                                group = group,
+                                expanded = expanded,
+                                onToggle = {
+                                    expandedPaths[group.path] = !expanded
+                                },
+                            )
                         }
-                        items(items = group.sessions, key = { it.sessionId }) { row ->
-                            SessionRow(row = row, onClick = { onOpenSession(row) })
+                        if (expanded) {
+                            items(items = group.sessions, key = { it.sessionId }) { row ->
+                                SessionRow(row = row, onClick = { onOpenSession(row) })
+                            }
                         }
                     }
                 }
@@ -258,11 +283,17 @@ fun SessionsScreen(
  * 单独成组比混进某个项目更诚实。
  */
 @Composable
-private fun WorkspaceHeader(group: CompatApi.WorkspaceGroup) {
+private fun WorkspaceHeader(
+    group: CompatApi.WorkspaceGroup,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
     val colors = LocalChatColors.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            // 整块可点：只让箭头可点的话，手指要精确落在 16dp 的图标上。
+            .clickable(onClick = onToggle)
             .padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 4.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -279,6 +310,16 @@ private fun WorkspaceHeader(group: CompatApi.WorkspaceGroup) {
                 text = group.sessions.size.toString(),
                 style = MaterialTheme.typography.labelSmall,
                 color = colors.placeholder,
+            )
+            // 展开指示：旋转 90° 的 V 形。用旋转而不是换图标 ——
+            // 换图标是两帧之间的突变，旋转是连续的，读起来更顺。
+            Icon(
+                imageVector = AppIcons.ChevronLeft,
+                contentDescription = null,
+                tint = colors.placeholder,
+                modifier = Modifier
+                    .size(16.dp)
+                    .graphicsLayer { rotationZ = if (expanded) 90f else 0f },
             )
         }
         // 完整路径只在有值且有父目录时显示 —— 顶层目录（如 /main）本身已经

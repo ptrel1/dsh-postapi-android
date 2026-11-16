@@ -56,6 +56,8 @@ class ComposeChatActivity : ComponentActivity() {
         // intent 里没有 sessionId。早先这下会当成新会话 ⇒ 每次开 App 都新建一条
         // 游离会话（实测 20261116 一天产生 7 条）。
         // 用户对「打开 App」的预期是接着上次聊，不是又开一段。
+        // 标题由会话列表传入（v0.10.3）：它有现成的值，这一页不该再请求一次。
+        val sessionTitle = intent.getStringExtra(EXTRA_SESSION_TITLE).orEmpty()
         val sessionId = intent.getStringExtra(EXTRA_SESSION_ID)
             ?: cd.ptrel.dshpostapi.AppPrefs.getLastSessionId(this)
         val streamClient = DshStreamClient(okHttpOf(api))
@@ -81,10 +83,41 @@ class ComposeChatActivity : ComponentActivity() {
                     if (!sessionId.isNullOrEmpty()) vm.openSession(sessionId)
                 }
                 Scaffold { padding ->
-                    ChatScreen(vm, Modifier.padding(padding).fillMaxSize())
+                    ChatScreen(
+                        viewModel = vm,
+                        title = sessionTitle,
+                        onBack = { finish() },
+                        onNewChat = {
+                            // 新建会话：复用同一个 Activity，换掉 sessionId 后重建。
+                            // 不 finish 再 start 是因为那样会闪一下白屏；
+                            // 这里直接重建，栈里不会堆出两个聊天页。
+                            recreateWithNewSession()
+                        },
+                        modifier = Modifier.padding(padding).fillMaxSize(),
+                    )
                 }
             }
         }
+    }
+
+    /**
+     * 新建会话（v0.10.3）：清掉 sessionId 后重建本 Activity。
+     *
+     * 为什么不 finish() 再 start 一个新的：那会闪一帧白屏，且返回栈里
+     * 会短暂出现两个聊天页。recreate 是同一次转场，视觉上更接近
+     * 「原地清空，开始新对话」。
+     *
+     * 为什么用 intent 而不是 ViewModel 的 reset()：Activity 重建后
+     * ViewModelStore 会保留旧实例（那是转屏复用的设计），
+     * 显式换 intent + recreate 才能保证拿到干净的 ViewModel。
+     */
+    private fun recreateWithNewSession() {
+        intent.removeExtra(EXTRA_SESSION_ID)
+        intent.removeExtra(EXTRA_SESSION_TITLE)
+        // 让 ViewModel 跟着这次重建一起销毁：不设这个 flag 的话，
+        // Activity 重建会复用同一个 ViewModelStore，旧消息还在。
+        intent.putExtra("recreate_for_new_session", true)
+        recreate()
     }
 
     /**
@@ -121,5 +154,6 @@ class ComposeChatActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_SESSION_ID = "session_id"
+        const val EXTRA_SESSION_TITLE = "session_title"
     }
 }
