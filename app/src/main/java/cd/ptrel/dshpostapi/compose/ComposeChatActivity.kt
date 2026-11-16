@@ -40,7 +40,14 @@ class ComposeChatActivity : ComponentActivity() {
             return
         }
 
+        // v0.9.1：没指定会话时，回退到「上次活跃会话」（ISSUE-01 P1）。
+        //
+        // 为什么要有这个回退：从桌面图标直接打开 App（不是从会话列表进来）时，
+        // intent 里没有 sessionId。早先这下会当成新会话 ⇒ 每次开 App 都新建一条
+        // 游离会话（实测 20261116 一天产生 7 条）。
+        // 用户对「打开 App」的预期是接着上次聊，不是又开一段。
         val sessionId = intent.getStringExtra(EXTRA_SESSION_ID)
+            ?: cd.ptrel.dshpostapi.AppPrefs.getLastSessionId(this)
         val streamClient = DshStreamClient(okHttpOf(api))
 
         setContent {
@@ -51,7 +58,7 @@ class ComposeChatActivity : ComponentActivity() {
                     factory = object : ViewModelProvider.Factory {
                         @Suppress("UNCHECKED_CAST")
                         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                            return ChatScreenViewModel(api, streamClient) as T
+                            return ChatScreenViewModel(api, streamClient, applicationContext) as T
                         }
                     },
                 )

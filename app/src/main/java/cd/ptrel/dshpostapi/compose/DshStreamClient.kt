@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.Dispatchers
+import cd.ptrel.dshpostapi.net.StreamEvent
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -80,7 +81,7 @@ class DshStreamClient(
                 if (payload.isEmpty()) continue
                 val event = parse(payload) ?: continue
                 trySend(event)
-                if (event is StreamEvent.Done || event is StreamEvent.Error) break
+                if (event is StreamEvent.Done || event is StreamEvent.Stopped || event is StreamEvent.Error) break
             }
             close()
         } catch (e: IOException) {
@@ -119,13 +120,22 @@ class DshStreamClient(
     private fun parse(payload: String): StreamEvent? = try {
         val o = JSONObject(payload)
         when (o.optString("type")) {
-            "start" -> o.optString("sessionId").takeIf { it.isNotEmpty() }?.let { StreamEvent.Started(it) }
+            // DSH 的 start 帧带 sessionId，SimpleChat 的 StreamEvent 没有对应类型。
+            // 客户端需要它（新会话首轮要记下来复用），所以借用 Title：
+            // Title 在 SimpleChat 里是「服务端下发的会话标题」，本项目不用该功能，
+            // 复用它传 sessionId 不会与任何既有逻辑冲突，UI 侧忽略即可。
+            "start" -> o.optString("sessionId").takeIf { it.isNotEmpty() }?.let { StreamEvent.Title(it) }
             "text" -> o.optString("text").takeIf { it.isNotEmpty() }?.let { StreamEvent.Content(it) }
             "reasoning" -> o.optString("text").takeIf { it.isNotEmpty() }?.let { StreamEvent.Reasoning(it) }
-            // 工具帧即使 name 为空也要发给 UI：它代表「模型正在做事」，
-            // 这正是用户需要的「没卡住」信号。
-            "tool" -> StreamEvent.Tool(o.optString("name"), o.optString("args"))
-            "done" -> StreamEvent.Done(cancelled = o.optString("reason") == "cancelled")
+            // 工具帧：SimpleChat 的 StreamEvent 没有通用 tool 类型
+            // （它的工具信息走 Anthropic 块级事件）。DSH 的 tool 帧暂时丢弃 ——
+            // 用户看不到「正在使用 X」，但不影响对话本身。
+            // 要显示工具过程，得在 StreamEvent 里加一个 Tool 类型并让 UI 处理。
+            "tool" -> null
+            "done" -> {
+                val cancelled = o.optString("reason") == "cancelled"
+                if (cancelled) StreamEvent.Stopped("cancelled") else StreamEvent.Done
+            }
             "error" -> StreamEvent.Error(o.optString("message", "未知错误"))
             else -> null
         }

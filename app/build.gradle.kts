@@ -11,13 +11,14 @@
 //      本项目没有反射扫描业务类，所以不需要大段 keep 规则。
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
+    // AGP 9 内置 Kotlin 支持，**不要**加 org.jetbrains.kotlin.android（会直接报错）。
     id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.kotlin.plugin.serialization")
 }
 
 android {
     namespace = "cd.ptrel.dshpostapi"
-    compileSdk = 35
+    compileSdk = 37
 
     // v0.9.0：开启 Compose。
     //
@@ -38,7 +39,7 @@ android {
         // 但 setAcceptThirdPartyCookies 与 WebView 现代 API 的稳定线在 24。
         // 24 覆盖 Android 7.0 及以上（2026 年仍在线的主流机型全在内）。
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 37
         // v0.4.0：修 4 个交互问题（用户实测反馈）。
         //   ① 冷启动也检查更新（之前只在登录 / WebView 首次加载时查）；
         //   ② 「更新后又提示需要更新」—— 记录 lastKnownLatestCode，本机已最新时清 skipped_code，
@@ -100,8 +101,8 @@ android {
         //      状态存 AppPrefs.desktop_mode（显示偏好，退出登录**不清**）。
         // 为什么是 Patch：两项是 bug 修复/UI 精简；桌面版切换虽是新功能，但只是一个显示开关，
         //   不改存储契约（新增独立 key）、不改变既有交互路径、无 API 变化。
-        versionCode = 36
-        versionName = "0.9.0"
+        versionCode = 37
+        versionName = "0.9.1"
     }
 
     buildFeatures {
@@ -136,9 +137,12 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        // 与 compileOptions 对齐，避免 Kotlin/Java 混编时出现不同目标字节码版本。
-        jvmTarget = "17"
+    // AGP 9 / Kotlin 2.4 起 kotlinOptions 已移除，统一走 compilerOptions。
+    kotlin {
+        compilerOptions {
+            // 与 compileOptions 对齐，避免 Kotlin/Java 混编时出现不同目标字节码版本。
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        }
     }
 }
 
@@ -160,7 +164,15 @@ dependencies {
     //
     // BOM 统一管理 Compose 各 artifact 版本 —— 单独写版本号迟早版本漂移。
     // 2024.09.03 是 Kotlin 2.0.21 的稳定搭配；升 BOM 前先核对它要求的编译器版本。
-    implementation(platform("androidx.compose:compose-bom:2024.09.03"))
+    // v0.10.0：BOM 从 2024.09.03 升到 2026.09.00。
+    //
+    // 为什么必须升：markdown-renderer 0.45.0 是用更新的 Compose 编译的，
+    // 在旧 runtime 上会抛 NoSuchMethodError:
+    //   No interface method shouldExecute(ZI)Z in class Landroidx/compose/runtime/Composer
+    // —— 这是 compose runtime 的内部接口变了签名。运行时才炸，编译期完全看不出来。
+    //
+    // 版本与 SimpleChat 保持一致，将来同步它的 UI 代码才不会再次踩到这类不匹配。
+    implementation(platform("androidx.compose:compose-bom:2026.09.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.foundation:foundation")
@@ -174,6 +186,21 @@ dependencies {
     // 协程。Compose 侧用 callbackFlow 消费 SSE，取消语义靠它保证。
     // 版本跟随 BOM 之外的稳定线，与 lifecycle 2.8.6 兼容。
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
+    // ==================== v0.10.0：移植 SimpleChat UI 所需 ====================
+    //
+    // 这套依赖与 SimpleChat 保持一致（版本见其 gradle/libs.versions.toml）。
+    // 为什么不自己写 Markdown 渲染：它已验证过流式场景下的块级增量、
+    // 代码高亮、表格、公式，自己写要重走一遍那些坑（见 cross/reference-projects.md）。
+    //
+    // ⚠️ 不引 Room：本项目的数据真相在服务端，本地库只会制造第二个事实来源。
+    //    SimpleChat 的 UI 依赖 UiMessage 的「形状」，不依赖它从哪来。
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+
+    implementation("com.mikepenz:multiplatform-markdown-renderer:0.45.0")
+    implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.45.0")
+    implementation("com.mikepenz:multiplatform-markdown-renderer-code:0.45.0")
+    implementation("dev.snipme:highlights:1.1.0")
     // androidx.core 提供 WindowInsetsCompat / ViewCompat / WindowCompat，
     // 是系统栏留白（WindowInsetsHelper）的直接依赖。
     // 为什么显式声明：appcompat 会**传递**带入 core-ktx，那属于"运气"；

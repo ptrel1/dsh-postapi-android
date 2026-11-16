@@ -1,14 +1,29 @@
 // 根构建脚本：只声明插件版本，具体配置在各模块里。
 //
-// 版本组合是保守稳定档（不是实验版本）：
-//   AGP 8.5.2 / Kotlin 2.0.21 / Gradle 8.7 / compileSdk 35
-//   —— AGP 8.5 要求 Gradle >= 8.7，Kotlin 2.0.x 与 AGP 8.5 兼容。
-// 升级其中任何一个都必须三者一起核对（见 README「工具链版本」一节）。
+// ⚠️ AGP 9 起 Kotlin 支持**内建**，不再需要 org.jetbrains.kotlin.android 插件
+//    （用了会直接报错：The 'org.jetbrains.kotlin.android' plugin is no longer
+//    required for Kotlin support since AGP 9.0）。
+//
+//    但 AGP 9 默认绑定的是较旧的 KGP（2.2.x）。Compose BOM 2026.09 的若干
+//    artifact 是用 Kotlin 2.4 编译的，低版本编译器读不了高版本元数据。
+//    所以按官方推荐做法，用 buildscript classpath 把 KGP 抬到 2.4.10。
+//
+// 版本组合约束（改任何一个都要三者一起核对）：
+//   AGP 9.4.1 要求 Gradle >= 9.0；Kotlin 2.4.10 与 Compose 插件必须同号。
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.10")
+    }
+}
+
 plugins {
-    id("com.android.application") version "8.5.2" apply false
-    id("org.jetbrains.kotlin.android") version "2.0.21" apply false
-    // Kotlin 2.0 起 Compose 编译器随 Kotlin 发布，版本与 kotlin 插件严格一致。
-    // 漏写这一项的现象是编译期报 "This version (x) of the Compose Compiler requires
-    // Kotlin version y" —— 两者必须同号，不可各自升级。
-    id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false
+    id("com.android.application") version "9.4.1" apply false
+    // 不要加 org.jetbrains.kotlin.android —— 见上方注释。
+    id("org.jetbrains.kotlin.plugin.compose") version "2.4.10" apply false
+    // 移植 SimpleChat 的 UI 需要序列化（它的模型层用 @Serializable）。
+    id("org.jetbrains.kotlin.plugin.serialization") version "2.4.10" apply false
 }

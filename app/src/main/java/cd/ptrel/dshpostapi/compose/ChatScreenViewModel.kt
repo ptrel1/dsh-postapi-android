@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import cd.ptrel.dshpostapi.CompatApi
+import cd.ptrel.dshpostapi.net.StreamEvent
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -12,7 +13,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /** 界面上的一条消息（UI 模型，与网络 DTO 分开）。 */
-data class UiMessage(
+data class NetMessage(
     /** 稳定 id：Compose 的 LazyColumn 靠它做 key，没有稳定 key 会整列表重组。 */
     val id: String,
     val role: Role,
@@ -43,10 +44,17 @@ data class UiMessage(
 class ChatScreenViewModel(
     private val api: CompatApi,
     private val streamClient: DshStreamClient,
+    /**
+     * 用于持久化「上次活跃会话」（ISSUE-01 P1）。
+     *
+     * 用 applicationContext 而不是 Activity：ViewModel 可能比 Activity 活得久，
+     * 持有 Activity 引用会泄漏。
+     */
+    private val appContext: android.content.Context,
 ) : ViewModel() {
 
     data class UiState(
-        val messages: List<UiMessage> = emptyList(),
+        val messages: List<NetMessage> = emptyList(),
         val busy: Boolean = false,
         val error: String? = null,
         val sessionId: String? = null,
@@ -71,9 +79,9 @@ class ChatScreenViewModel(
         val trimmed = text.trim()
         if (trimmed.isEmpty() || _state.value.busy) return
 
-        val userMsg = UiMessage(nextId("u"), UiMessage.Role.User, trimmed)
+        val userMsg = NetMessage(nextId("u"), NetMessage.Role.User, trimmed)
         val replyId = nextId("a")
-        val placeholder = UiMessage(replyId, UiMessage.Role.Assistant, status = UiMessage.Status.Streaming)
+        val placeholder = NetMessage(replyId, NetMessage.Role.Assistant, status = NetMessage.Status.Streaming)
 
         _state.update {
             it.copy(
@@ -87,23 +95,31 @@ class ChatScreenViewModel(
         streamJob = viewModelScope.launch {
             streamClient.stream(request).collect { event ->
                 when (event) {
-                    is StreamEvent.Started -> _state.update { it.copy(sessionId = event.sessionId) }
+                    // ⚠️ 这里用 Title 承载 DSH 的 start 帧（见 DshStreamClient 的注释）：
+                    //    SimpleChat 的 StreamEvent 没有 Started 类型，而我们需要 sessionId。
+                    is StreamEvent.Title -> {
+                        val sid = event.text
+                        // 服务端分配了会话 id → 立刻持久化。
+                        // 不能等「这一轮结束」才存：用户可能在流式期间就退出，
+                        // 那时再存就没机会了（进程随时可能被回收）。
+                        cd.ptrel.dshpostapi.AppPrefs.setLastSessionId(appContext, sid)
+                        _state.update { it.copy(sessionId = sid) }
+                    }
                     is StreamEvent.Content -> updateReply(replyId) { it.copy(text = it.text + event.text) }
                     is StreamEvent.Reasoning -> updateReply(replyId) { it.copy(reasoning = it.reasoning + event.text) }
-                    is StreamEvent.Tool -> updateReply(replyId) {
-                        // 工具名可能为空（服务端某些帧只给 id），空时保留上一个，
-                        // 否则界面会闪一下「正在使用 」这种断句。
-                        it.copy(tool = event.name.ifEmpty { it.tool ?: "" })
-                    }
                     is StreamEvent.Done -> {
-                        val status = if (event.cancelled) UiMessage.Status.Stopped else UiMessage.Status.Done
-                        updateReply(replyId) { it.copy(status = status, tool = null) }
+                        updateReply(replyId) { it.copy(status = NetMessage.Status.Done, tool = null) }
+                        _state.update { it.copy(busy = false) }
+                    }
+                    is StreamEvent.Stopped -> {
+                        updateReply(replyId) { it.copy(status = NetMessage.Status.Stopped, tool = null) }
                         _state.update { it.copy(busy = false) }
                     }
                     is StreamEvent.Error -> {
-                        updateReply(replyId) { it.copy(status = UiMessage.Status.Error, tool = null) }
+                        updateReply(replyId) { it.copy(status = NetMessage.Status.Error, tool = null) }
                         _state.update { it.copy(busy = false, error = event.message) }
                     }
+                    else -> Unit   // Usage / 块级事件：本项目暂不消费
                 }
             }
         }
@@ -119,7 +135,7 @@ class ChatScreenViewModel(
                 // 把最后一条仍在 Streaming 的回复标成已停止 ——
                 // 否则那个「正在生成」的动画会一直转下去。
                 messages = st.messages.map {
-                    if (it.status == UiMessage.Status.Streaming) it.copy(status = UiMessage.Status.Stopped, tool = null) else it
+                    if (it.status == NetMessage.Status.Streaming) it.copy(status = NetMessage.Status.Stopped, tool = null) else it
                 },
             )
         }
@@ -127,6 +143,8 @@ class ChatScreenViewModel(
 
     /** 读某个会话的历史（进入会话时调用）。 */
     fun openSession(sessionId: String) {
+        // 进入会话即记为「上次活跃」—— 用户下次打开 App 应该回到这里。
+        cd.ptrel.dshpostapi.AppPrefs.setLastSessionId(appContext, sessionId)
         _state.update { it.copy(sessionId = sessionId, messages = emptyList(), error = null) }
         // ⚠️ 必须 withContext(IO)：CompatApi.history() 内部是 OkHttp 的同步 execute()。
         //    viewModelScope 默认跑 Dispatchers.Main，直接调会抛 NetworkOnMainThreadException
@@ -138,9 +156,9 @@ class ChatScreenViewModel(
             when (result) {
                 is CompatApi.Result.Ok -> {
                     val list = result.value.messages.map { m ->
-                        UiMessage(
+                        NetMessage(
                             id = nextId(if (m.role == "user") "u" else "a"),
-                            role = if (m.role == "user") UiMessage.Role.User else UiMessage.Role.Assistant,
+                            role = if (m.role == "user") NetMessage.Role.User else NetMessage.Role.Assistant,
                             text = m.text,
                         )
                     }
@@ -155,7 +173,7 @@ class ChatScreenViewModel(
     }
 
     /** 就地更新某条回复（copy 出新列表，保证 Compose 能看出变化）。 */
-    private fun updateReply(id: String, transform: (UiMessage) -> UiMessage) {
+    private fun updateReply(id: String, transform: (NetMessage) -> NetMessage) {
         _state.update { st ->
             st.copy(messages = st.messages.map { if (it.id == id) transform(it) else it })
         }

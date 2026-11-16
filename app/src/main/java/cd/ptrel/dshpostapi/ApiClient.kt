@@ -150,8 +150,10 @@ object ApiClient {
             // 这里显式写成同族形态，降低两边被判成不同类别的概率。
             .header(
                 "User-Agent",
-                "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 " +
-                    "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 DSH-PostAPI-Android/0.1",
+                // v0.9.1：统一由 UserAgent 提供（见该类注释）。
+                // 登录用的 UA 必须与后续所有请求**逐字节相同** ——
+                // 插件把会话指纹绑在它的 sha256 上。
+                UserAgent.VALUE,
             )
             .header("Accept", "application/json")
             .build()

@@ -87,10 +87,8 @@ object UpdateClient {
      * 且失配累计 3 次会**吊销 sid**，代价远大于多写一长串 UA。
      * 末尾保留 App 标识，便于服务端访问日志里区分来源。
      */
-    private fun mobileUserAgent(): String =
-        "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 " +
-            "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 DSH-PostAPI-Android/" +
-            BuildConfig.VERSION_NAME
+    /** v0.9.1：统一由 UserAgent 提供（见该类注释）。 */
+    private fun mobileUserAgent(): String = UserAgent.VALUE
 
     /**
      * 调用 GET /api/dsh/v1/app-version 检查更新。

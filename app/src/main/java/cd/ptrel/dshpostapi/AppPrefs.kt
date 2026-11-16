@@ -154,6 +154,54 @@ object AppPrefs {
      */
     const val KEY_UI_MODE = "ui_mode"
 
+    // ==================== v0.9.1：上次活跃会话 ====================
+    //
+    // ## 为什么需要持久化 sessionId
+    //
+    // 20261116 ISSUE-01 实测：Compose 聊天页的 sessionId 原本只存在
+    // ChatScreenViewModel 的内存里。退出聊天页或 App 重启即丢失，
+    // 下次发送走「新会话」分支 ⇒ POST /chat/stream 的 sessionId 为 null
+    // ⇒ 服务端每次创建新会话 ⇒ 会话列表里堆一串内容只有一条消息的游离会话。
+    //
+    // 用户侧表现是「我明明接着聊的，怎么又多了一个会话」。
+    //
+    // 存「最后一次活跃的会话」而不是整体会话列表：
+    //   · 会话列表以服务端为准（/sessions），本地缓存反而会不一致；
+    //   · 用户重开 App 的预期是「接着上次那段聊」，不是「回到某个固定页」。
+    const val KEY_LAST_SESSION_ID = "last_session_id"
+
+    /** 读取上次活跃会话 id；从未记过或读取失败返回 null。 */
+    fun getLastSessionId(context: Context): String? {
+        return try {
+            val prefs = open(context) ?: return null
+            prefs.getString(KEY_LAST_SESSION_ID, null)?.takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            Log.w(TAG, "read " + KEY_LAST_SESSION_ID + " failed (" + e.javaClass.simpleName + ")")
+            null
+        }
+    }
+
+    /**
+     * 记住当前活跃会话。
+     *
+     * @param sessionId 传 null 或空串表示「清除」（用户主动新建会话时）。
+     * @return false 表示写入失败（存储不可用）。调用方**不应**因此中断流程 ——
+     *   记不住只会导致下次失去续聊能力，不影响本次使用。
+     */
+    fun setLastSessionId(context: Context, sessionId: String?): Boolean {
+        return try {
+            val prefs = open(context) ?: return false
+            prefs.edit().apply {
+                if (sessionId.isNullOrBlank()) remove(KEY_LAST_SESSION_ID)
+                else putString(KEY_LAST_SESSION_ID, sessionId)
+            }.apply()
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "write " + KEY_LAST_SESSION_ID + " failed (" + e.javaClass.simpleName + ")")
+            false
+        }
+    }
+
     /** 完整模式（WebView 承载 DSH 网页）。功能全，依赖系统 WebView 内核。 */
     const val UI_MODE_FULL = "full"
 

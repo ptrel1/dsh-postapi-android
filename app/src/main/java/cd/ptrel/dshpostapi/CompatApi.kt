@@ -58,9 +58,10 @@ class CompatApi(
          * 修法：与 ApiClient 保持同一个字面量。两边必须一致 ——
          * 改这里就要同步改 ApiClient.kt 与 UpdateClient.mobileUserAgent()。
          */
-        private const val MOBILE_UA =
-            "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 " +
-                "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 DSH-PostAPI-Android"
+        // v0.9.1：UA 统一由 UserAgent 提供（ISSUE-20261116-01 P2）。
+        // 早先这里、ApiClient、UpdateClient 各写一份字面量，三份都不同 ⇒
+        // 每次登录与每次请求的指纹哈希都在变。改为单一来源。
+        private val MOBILE_UA: String get() = UserAgent.VALUE
         private const val API_PREFIX = "/api/dsh/v1"
         private val JSON_MEDIA = "application/json; charset=utf-8".toMediaTypeOrNull()
 
