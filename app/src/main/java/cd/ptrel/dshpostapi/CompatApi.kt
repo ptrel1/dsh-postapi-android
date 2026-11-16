@@ -73,6 +73,24 @@ class CompatApi(
         fun fromStore(context: android.content.Context): CompatApi? {
             val account = AccountStore.load(context) ?: return null
             if (account.cookieValue.isEmpty()) return null
+
+            // ⚠️ v0.8.2：必须在这里判过期，不能只判非空。
+            //
+            // 插件会话默认 24 小时（DEFAULT_MAX_AGE_MS），过期后服务端直接当没有会话，
+            // 返回 401。而 AccountStore.load() **不做**过期校验（它只管解密与字段完整性），
+            // 所以 5 天后打开 App 时：cookieValue 非空 → 造出实例 → 带着死 cookie 发请求
+            // → 401 → 界面提示「未登录或凭据已失效」。
+            //
+            // 用户看到的是「明明刚登录过怎么又未登录」，实际是过期的 cookie 被当成可用的用。
+            // 返回 null 让调用方走「需要重新登录」的正常路径，比发一个必然失败的请求更诚实。
+            //
+            // 注意用 hasFreshCookie 而不是自己比 cookieExp：
+            // 它同时覆盖 cookieName 为空、cookieExp 为 0（服务端没给 maxAge）两种情况。
+            if (!account.hasFreshCookie()) {
+                android.util.Log.i(TAG, "fromStore: 本地 cookie 已过期，需重新登录")
+                return null
+            }
+
             return CompatApi(account.host, account.cookieName, account.cookieValue, context.cacheDir)
         }
     }

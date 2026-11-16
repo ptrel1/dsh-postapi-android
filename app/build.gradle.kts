@@ -12,11 +12,25 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
     namespace = "cd.ptrel.dshpostapi"
     compileSdk = 35
+
+    // v0.9.0：开启 Compose。
+    //
+    // 为什么现在才开（原注释写的是「MVP 只有两个页面，不用 Compose」）：
+    //   那个前提已经不成立 —— 兼容模式已经是完整聊天界面，且要做 Markdown 渲染、
+    //   消息树、流式滚动对齐，这些用 View + RecyclerView 手写状态同步的成本
+    //   已经高于 Compose 的声明式收益。
+    //
+    // 与 View 体系**共存**，不是替换：登录页、WebView 完整模式、更新器全部保持原样
+    // （它们是踩过坑的产物，没有重写理由）。
+    buildFeatures {
+        compose = true
+    }
 
     defaultConfig {
         applicationId = "cd.ptrel.dshpostapi"
@@ -86,8 +100,8 @@ android {
         //      状态存 AppPrefs.desktop_mode（显示偏好，退出登录**不清**）。
         // 为什么是 Patch：两项是 bug 修复/UI 精简；桌面版切换虽是新功能，但只是一个显示开关，
         //   不改存储契约（新增独立 key）、不改变既有交互路径、无 API 变化。
-        versionCode = 34
-        versionName = "0.8.1"
+        versionCode = 35
+        versionName = "0.8.2"
     }
 
     buildFeatures {
@@ -141,6 +155,22 @@ dependencies {
     implementation("androidx.recyclerview:recyclerview:1.3.2")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // ==================== v0.9.0：Compose（聊天界面） ====================
+    //
+    // BOM 统一管理 Compose 各 artifact 版本 —— 单独写版本号迟早版本漂移。
+    // 2024.09.03 是 Kotlin 2.0.21 的稳定搭配；升 BOM 前先核对它要求的编译器版本。
+    implementation(platform("androidx.compose:compose-bom:2024.09.03"))
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.material3:material3")
+    // activity-compose 提供 setContent{}；没有它只能在 ComposeView 里手写 setContent。
+    implementation("androidx.activity:activity-compose:1.9.2")
+    // ViewModel + StateFlow 的 Compose 适配（collectAsStateWithLifecycle）。
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
+    debugImplementation("androidx.compose.ui:ui-tooling")
     // androidx.core 提供 WindowInsetsCompat / ViewCompat / WindowCompat，
     // 是系统栏留白（WindowInsetsHelper）的直接依赖。
     // 为什么显式声明：appcompat 会**传递**带入 core-ktx，那属于"运气"；

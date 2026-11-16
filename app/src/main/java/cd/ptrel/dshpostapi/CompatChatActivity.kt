@@ -59,6 +59,9 @@ class CompatChatActivity : AppCompatActivity(), ChatViewModel.Listener {
     /** 流式中的那条消息还没进列表，单独存一份给最后一行用。 */
     private var streamingText: String = ""
 
+    /** v0.8.2：防止重复跳转（onCreate / onResume 可能多次探测凭据）。 */
+    private var redirecting = false
+
     /** v0.8.0：「没有更多历史」只提示一次，避免每次滚到顶都弹。 */
     private var loadMoreHintShown = false
 
@@ -101,7 +104,10 @@ class CompatChatActivity : AppCompatActivity(), ChatViewModel.Listener {
 
         val api = CompatApi.fromStore(this)
         if (api == null) {
+            // v0.8.2：凭据不可用 → 回登录页（与 CompatSessionsActivity 同一套处理）。
+            // 只红字提示会让用户卡在一个没有任何出口的界面里。
             showError(getString(R.string.compat_not_logged_in))
+            redirectToLogin()
             return
         }
         val model = ChatViewModel(api, this)
@@ -187,6 +193,8 @@ class CompatChatActivity : AppCompatActivity(), ChatViewModel.Listener {
     private fun downloadDeliverable(sessionId: String, d: CompatApi.Deliverable) {
         val api = CompatApi.fromStore(this)
         if (api == null) {
+            // 这里**不跳转**：用户正在读对话，突然被换页比看到一行提示更糟。
+            // 让他自己决定什么时候重新登录（返回键回列表时会走列表页的跳转逻辑）。
             showError(getString(R.string.compat_not_logged_in))
             return
         }
@@ -226,6 +234,30 @@ class CompatChatActivity : AppCompatActivity(), ChatViewModel.Listener {
             // 给出确切路径让用户自己去找，而不是笼统地说失败了。
             showError(getString(R.string.compat_open_failed, file.absolutePath))
         }
+    }
+
+    /**
+     * 回登录页重新认证（v0.8.2）。
+     *
+     * 与 CompatSessionsActivity.redirectToLogin 同一套逻辑：
+     * 延迟 1.2 秒让用户看见提示，然后 NEW_TASK + CLEAR_TASK 清栈跳转 ——
+     * 重新登录后不该还能按返回键回到失效的界面。
+     */
+    private fun redirectToLogin() {
+        if (redirecting) return
+        redirecting = true
+        binding.root.postDelayed({
+            if (isFinishing || isDestroyed) return@postDelayed
+            startActivity(
+                android.content.Intent(this, LoginActivity::class.java).apply {
+                    addFlags(
+                        android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                            android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK,
+                    )
+                },
+            )
+            finish()
+        }, 1200L)
     }
 
     private fun scrollToBottom() {

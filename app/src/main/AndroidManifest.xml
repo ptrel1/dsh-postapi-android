@@ -88,6 +88,19 @@
             android:exported="false" />
 
         <!--
+          v0.9.0：Compose 骨架验证页（临时）。
+
+          windowSoftInputMode 用 adjustResize 而不是 adjustNothing：
+          Compose 的 IME 处理靠 WindowInsets.ime，需要窗口真的被 resize
+          （adjustNothing 会让 Compose 以为没有键盘）。等聊天页落地时再统一核对。
+        -->
+        <activity
+            android:name=".ComposeProbeActivity"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!--
           WebViewActivity 用 adjustNothing（v0.4.5）—— 键盘让位完全由 App 自己用
           translationY 完成（见 WindowInsetsHelper.applySystemBarPadding 的 translateForIme）。
 

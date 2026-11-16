@@ -7,4 +7,8 @@
 plugins {
     id("com.android.application") version "8.5.2" apply false
     id("org.jetbrains.kotlin.android") version "2.0.21" apply false
+    // Kotlin 2.0 起 Compose 编译器随 Kotlin 发布，版本与 kotlin 插件严格一致。
+    // 漏写这一项的现象是编译期报 "This version (x) of the Compose Compiler requires
+    // Kotlin version y" —— 两者必须同号，不可各自升级。
+    id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false
 }

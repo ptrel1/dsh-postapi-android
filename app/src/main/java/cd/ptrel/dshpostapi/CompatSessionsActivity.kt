@@ -34,6 +34,10 @@ class CompatSessionsActivity : AppCompatActivity() {
         const val TAG = "CompatSessions"
     }
 
+    /** v0.8.2：防止重复跳转（load 可能被 onResume 多次触发）。 */
+
+    private var redirecting = false
+
     private lateinit var binding: ActivityCompatSessionsBinding
     private val io = Executors.newSingleThreadExecutor { r ->
         Thread(r, "compat-sessions-io").apply { isDaemon = true }
@@ -66,7 +70,14 @@ class CompatSessionsActivity : AppCompatActivity() {
     private fun load() {
         val api = CompatApi.fromStore(this)
         if (api == null) {
+            // v0.8.2：凭据不可用（没有 / 已过期）时**必须把用户送回登录页**，
+            // 不能只红字提示就停在这里。
+            //
+            // 早先只 showError 然后 return —— 用户看到「未登录或凭据已失效」，
+            // 但界面上没有任何可点的东西，只能自己去翻菜单，体验上等于卡死。
+            // 兼容模式没有地址栏、没有下拉刷新，用户唯一的出路是返回键试运气。
             showError(getString(R.string.compat_not_logged_in))
+            redirectToLogin()
             return
         }
         binding.sessionsError.visibility = View.GONE
@@ -84,6 +95,33 @@ class CompatSessionsActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * 回登录页重新认证。
+     *
+     * 延迟一小会儿再跳：让用户**看见**那行「凭据已失效」的提示，
+     * 否则界面一闪就换页，用户不知道发生了什么（以为是自己点错了）。
+     *
+     * 用 LoginActivity 而不是 CompatActivity 作为目标：
+     * 后者是分发器，会再次读 UI 模式并可能又绕回本页，形成循环。
+     */
+    private fun redirectToLogin() {
+        if (redirecting) return
+        redirecting = true
+        binding.root.postDelayed({
+            if (isFinishing || isDestroyed) return@postDelayed
+            startActivity(
+                android.content.Intent(this, LoginActivity::class.java).apply {
+                    // 清掉返回栈：重新登录后不该还能按返回键回到失效的列表页
+                    addFlags(
+                        android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                            android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK,
+                    )
+                },
+            )
+            finish()
+        }, 1200L)
     }
 
     private fun showError(msg: String) {

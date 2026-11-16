@@ -412,7 +412,70 @@ v0.2.0 的 `UpdateSession` 是**独立的内存单例**。v0.3.0 把它改成
 
 ---
 
-## 六、需要真机验证的清单（按风险排序）
+## 六、参考项目
+
+> 本 App 的**核心设计决策**（流式滚动、Markdown 渲染、输入法处理）参考了下面这些
+> 成熟实现。许可与可复用边界一并写明 —— **参考 ≠ 照搬**，写清来源也是给自己
+> 留一条回查的路。
+
+### SimpleChat（Pokanshuu/Simple-Chat）
+
+| 项 | 内容 |
+| :--- | :--- |
+| **地址** | https://github.com/Pokanshuu/Simple-Chat |
+| **许可** | **MIT** —— 可商用、可修改、可分发，需保留版权声明与许可全文 |
+| **规模** | 32,077 行 Kotlin（165 文件），release 经 R8 后约 3.7 MB |
+| **技术栈** | Jetpack Compose + Room + OkHttp 5 + kotlinx.serialization；**零** Navigation / Hilt / Koin / Retrofit / Markwon |
+| **我们用了它什么** | 见下方「可直接复用的结论」 |
+
+**⭐ 可直接复用的踩坑结论（这些比代码更值钱）**
+
+| 主题 | 结论 |
+| :--- | :--- |
+| **流式滚动锚点** | 聊天列表必须**顶部为原点**（`reverseLayout = false` / `stackFromEnd = false`）。锚点钉顶边时，流式消息（永远是最后一条）在**底边**长高 = 长在视口下方，屏上内容纹丝不动。反之钉底边会把已显示内容整体上顶，**实测 0.5 秒滑走 861px，手指拦不住** |
+| **跟底不要跳** | 内容是离散来的（数据层每 50ms 一批）、屏幕 60Hz，「每帧 scrollToBottom」的表现是**每 50ms 挪一个台阶**。改成每帧吃掉剩余距离的 **0.7**，运动才连续 |
+| **流式 Markdown** | `Markdown(全文)` 只要一个字符变了，整篇 AST 重来 —— 五千字回复流式期间要整篇解析几十次。**切成块**后已完成块不再变，解析量从 O(全文) 降到 O(尾块) |
+| **输入法拉起** | `requestFocus()` 只给焦点，系统输入法不会自己出来。必须显式 `show()`，**且等一帧**让焦点真正落位，否则 `show()` 被忽略 |
+| **长按语音与选词** | 长按要挂在**整条输入栏**而不是输入框上，且只在**空输入框**时响应 —— 挂在输入框会跟文本框自己的长按（选词/移光标）打架 |
+| **浮层输入栏** | 输入栏浮在消息列表之上（不占位）时，**必须给列表底部留 `contentPadding`**，否则最后一条永远被压在输入栏底下、滚不出来 |
+
+**可移植模块（零 Compose 依赖，纯 Kotlin，共 1051 行）**
+
+| 文件 | 行数 | 用途 |
+| :--- | :--- | :--- |
+| `ui/markdown/MarkdownBlockSplitter.kt` | 145 | 按空行切块（规则必须与 SoftBreaks 一致，否则同一段会被两种规则撕成不同形状） |
+| `ui/markdown/HtmlNormalize.kt` | 410 | HTML 标签归一化 |
+| `ui/markdown/MathSplit.kt` | 160 | `$…$` / `$$…$$` 切分 |
+| `ui/markdown/SoftBreaks.kt` | 139 | 裸换行补空行 |
+| `net/SseLineParser.kt` | 99 | SSE 行解析 |
+| `ui/chat/TextChunks.kt` | 54 | 文本分块 |
+| `ui/chat/ContinuePolicy.kt` | 44 | 断点续写判定 |
+
+**不能直接用的部分**
+
+- **UI 层全部是 Compose**（19,700 行）。本项目 v0.9.0 之前是 View/XML，
+  两者不能直接混用同一套屏幕代码（可经 `ComposeView` 逐屏迁移）。
+- **它面向 OpenAI / Anthropic 兼容端点**，本项目面向 DSH 私有插件 API
+  （`/sessions` `/chat/history` `/chat/stream`）。数据模型不同：
+  它用本地 Room + 消息树（`parentId` + `variantIndex`），本项目以服务端为唯一真相。
+- **工具链较新**：AGP 9.4.1 / Kotlin 2.4.10 / compileSdk 37 / Compose BOM 2026.09.00。
+  本项目是 AGP 8.5.2 / Kotlin 2.0.21 / compileSdk 35，移植其 Compose 代码需降级改写。
+
+**架构上值得学的一点**
+
+```
+UI (Compose) → ViewModel → ChatApi 门面 → SSE
+                              ↓
+                    StreamEvent（sealed interface）
+```
+
+UI **只依赖 `StreamEvent` 抽象**，不碰 SSE 细节。换后端 = 新增一个
+`Flow<StreamEvent>` 实现 + 在 ViewModel 里切一行，**UI 层零改动**。
+本项目接入 DSH 时沿用了这个分层。
+
+---
+
+## 七、需要真机验证的清单（按风险排序）
 
 > 下面每一条都是**我无法在本机验证**的。编写环境没有 Android SDK / Gradle / adb，**代码从未编译过**。
 
@@ -554,7 +617,7 @@ v0.2.0 的 `UpdateSession` 是**独立的内存单例**。v0.3.0 把它改成
 
 ---
 
-## 七、用户在手机上的操作步骤
+## 八、用户在手机上的操作步骤
 
 1. **安装 App**：`adb install -r app-debug.apk`，或直接把 APK 传到手机点击安装（需允许"安装未知来源应用"）。
 
@@ -595,7 +658,7 @@ v0.2.0 的 `UpdateSession` 是**独立的内存单例**。v0.3.0 把它改成
 
 ---
 
-## 八、已知限制（第一版刻意不做）
+## 九、已知限制（第一版刻意不做）
 
 | # | 限制 | 为什么 | 何时处理 |
 | :--- | :--- | :--- | :--- |
@@ -611,7 +674,7 @@ v0.2.0 的 `UpdateSession` 是**独立的内存单例**。v0.3.0 把它改成
 
 ---
 
-## 八之一、Android 10 及以下的键盘让位问题（**已知，不修**）
+## 九之一、Android 10 及以下的键盘让位问题（**已知，不修**）
 
 ### 症状
 
@@ -661,7 +724,7 @@ adb logcat -s WebViewLayout
 
 ---
 
-## 九、第二版要用的接口（MVP 不依赖）
+## 十、第二版要用的接口（MVP 不依赖）
 
 ```
 GET  /api/dsh/v1/files?sessionId=<sid>   → { ok, files:[{seq,index,turn,time,path,name,description,size}] }
@@ -678,7 +741,7 @@ GET  /api/dsh/v1/file/<token>            → 文件流（支持 Range / 206）
 
 ---
 
-## 十、已知服务端配置现状（只读确认，未改动）
+## 十一、已知服务端配置现状（只读确认，未改动）
 
 | 项 | 现状 |
 | :--- | :--- |
@@ -690,7 +753,7 @@ GET  /api/dsh/v1/file/<token>            → 文件流（支持 Range / 206）
 
 ---
 
-## 十一、检查更新（v0.2.0）
+## 十二、检查更新（v0.2.0）
 
 ```
 ① 登录成功（LoginActivity.openWebView）
@@ -721,7 +784,7 @@ GET  /api/dsh/v1/file/<token>            → 文件流（支持 Range / 206）
 
 ---
 
-## 十二、版本
+## 十三、版本
 
 `0.3.0`（versionCode 4）—— **账号本地记忆（加密）**：EncryptedSharedPreferences 保存
 host/username/password/cookie，启动免登录；cookie 失效自动重登并按 401/403 清密码；
