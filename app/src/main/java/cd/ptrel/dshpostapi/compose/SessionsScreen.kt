@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,6 +34,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import cd.ptrel.dshpostapi.CompatApi
+import cd.ptrel.dshpostapi.groupByWorkspace
 import cd.ptrel.dshpostapi.R
 import cd.ptrel.dshpostapi.data.Res
 import cd.ptrel.dshpostapi.ui.common.AppIcons
@@ -192,6 +195,10 @@ fun SessionsScreen(
             }
 
             else -> {
+                // 分组在外面算：LazyColumn 的 content lambda 不是 @Composable
+                // 作用域（它是 LazyListScope），remember 放进去会报
+                // 「@Composable invocations can only happen from a @Composable function」。
+                val groups = remember(state.sessions) { state.sessions.groupByWorkspace() }
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -204,8 +211,18 @@ fun SessionsScreen(
                     ),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    items(items = state.sessions, key = { it.sessionId }) { row ->
-                        SessionRow(row = row, onClick = { onOpenSession(row) })
+                    // v0.10.2：按工作区分组渲染。
+                    //
+                    // 早先是扁平一列。DSH 的会话天然属于某个工作区（cwd），
+                    // 30 个会话平铺时用户找「上次在某个项目里干到哪了」只能靠标题猜。
+                    // 分组后：组标题是项目名，组内按时间倒序，组间按最近活动倒序。
+                    groups.forEach { group ->
+                        item(key = "hdr-" + group.path) {
+                            WorkspaceHeader(group)
+                        }
+                        items(items = group.sessions, key = { it.sessionId }) { row ->
+                            SessionRow(row = row, onClick = { onOpenSession(row) })
+                        }
                     }
                 }
             }
@@ -224,6 +241,55 @@ fun SessionsScreen(
                 onClick = onNewSession,
                 modifier = Modifier.fillMaxWidth(),
                 selected = true,
+            )
+        }
+    }
+}
+
+/**
+ * 工作区分组标题（v0.10.2）。
+ *
+ * 三段信息各有用途：
+ *   · 项目名（最后一段路径）—— 用户认的是这个，一眼定位；
+ *   · 完整路径 —— 同名项目（不同父目录）靠它区分，小字灰显不抢焦点；
+ *   · 会话数 —— 让用户知道这组里有多少，免得逐个点。
+ *
+ * cwd 为空的会话归到「其他」：宿主没给工作目录（老会话/非 workdir 场景），
+ * 单独成组比混进某个项目更诚实。
+ */
+@Composable
+private fun WorkspaceHeader(group: CompatApi.WorkspaceGroup) {
+    val colors = LocalChatColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 4.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = group.name.ifBlank { Res.get(R.string.compat_workspace_other) },
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = group.sessions.size.toString(),
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.placeholder,
+            )
+        }
+        // 完整路径只在有值且有父目录时显示 —— 顶层目录（如 /main）本身已经
+        // 和组名一样了，再显示一遍是噪音。
+        if (group.path.isNotBlank() && group.path.trimEnd('/').contains('/')) {
+            Text(
+                text = group.path,
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.placeholder,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
@@ -260,6 +326,17 @@ private fun SessionRow(
             tint = colors.placeholder,
             modifier = Modifier.size(18.dp),
         )
+        // v0.10.2：正在运行的会话加一个状态点。
+        //
+        // 服务端 /sessions 一直有 running 字段，客户端却没解析 —— 用户看不出
+        // 哪个会话在后台跑，只能挨个点进去确认。列表页最该一眼看出的就是这件事。
+        if (row.running) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .background(MaterialTheme.colorScheme.primary, CircleShape),
+            )
+        }
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = row.title.ifBlank { Res.get(R.string.compat_untitled) },

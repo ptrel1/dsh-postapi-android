@@ -107,7 +107,48 @@ class CompatApi(
         val sessionId: String,
         val title: String,
         val updatedAt: Long,
+        /**
+         * 该会话是否有一轮正在生成（v0.10.2）。
+         *
+         * 服务端 /sessions 从 v1.9.x 起就返回 running: s.running === true，
+         * 但客户端一直没解析 —— 于是「哪个会话在后台跑」这条信息被白白丢掉。
+         * 有了它，列表可以给正在运行的会话画一个状态点，用户不必点进去才知道。
+         */
+        val running: Boolean = false,
+        /**
+         * 会话的工作目录（v0.10.2）。
+         *
+         * 服务端从 v1.9.x 起就返回 cwd，客户端一直没解析 —— 与 running 同一种遗漏。
+         * DSH 的会话按工作区（项目目录）聚合才有意义：用户开一个会话是为了
+         * 在某个项目里干活，把 30 个会话平铺成一列，找「上次在 dsh1-plugins 里
+         * 干到哪了」只能靠标题猜。
+         *
+         * 空串 = 宿主没给（老会话或非 workdir 场景）。这类会话归到「其他」。
+         */
+        val cwd: String = "",
     )
+
+    /**
+     * 按工作区分组后的一个区（v0.10.2）。
+     *
+     * 排序规则（两层）：
+     *   组内：会话按 updatedAt 倒序 —— 同一项目里最近聊的排前面；
+     *   组间：按组内**最新**会话的 updatedAt 倒序 —— 最近在动的项目浮上来。
+     * 为什么不按组名排：用户找的是「我刚才在哪个项目里干活」，不是字典序。
+     */
+    data class WorkspaceGroup(
+        /** 组名：cwd 的最后一段（如 dsh1-plugins）；空 cwd 时为空串，UI 显示「其他」。 */
+        val name: String,
+        /** 完整路径，作为副标题显示 —— 同名工作区（不同父目录）靠它区分。 */
+        val path: String,
+        /** 组内会话，按 updatedAt 倒序。 */
+        val sessions: List<SessionRow>,
+    ) {
+        /** 组内最新一条的时间，用于组间排序。 */
+        val latestAt: Long get() = sessions.firstOrNull()?.updatedAt ?: 0L
+    }
+
+
 
     /**
      * 一次历史读取的结果。
@@ -182,6 +223,8 @@ class CompatApi(
                             o.optString("sessionId", "").take(12)
                         },
                         updatedAt = o.optLong("updatedAt", 0L),
+                        running = o.optBoolean("running", false),
+                        cwd = o.optString("cwd", ""),
                     ),
                 )
             }
@@ -416,4 +459,36 @@ class CompatApi(
         in 500..599 -> "服务端错误（" + code + "）"
         else -> "请求失败（" + code + "）"
     }
+}
+
+/**
+ * 把扁平的会话列表按 cwd 聚成工作区。
+ *
+ * ⚠️ 为什么是**顶层**函数而不是放在 CompatApi.Companion 里：
+ *   Kotlin **不允许从外部导入定义在对象内部的扩展函数**
+ *   （import ...Companion.groupByWorkspace 会报 Unresolved reference）。
+ *   UI 层要用它，就必须是顶层可见的。
+ *
+ * 纯函数、无副作用 —— 可以被单元测试直接覆盖。
+ * 排序错了是最难靠肉眼发现的那类 bug，能测就一定要测。
+ */
+/**
+ * 把扁平的会话列表按 cwd 聚成工作区。
+ *
+ * 纯函数、无副作用 —— 这样它可以被单元测试直接覆盖，
+ * 不必起模拟器验证排序（排序错了是最难靠肉眼发现的那类 bug）。
+ */
+fun List<CompatApi.SessionRow>.groupByWorkspace(): List<CompatApi.WorkspaceGroup> {
+    return this
+        .groupBy { it.cwd }
+        .map { (cwd, list) ->
+            val sorted = list.sortedByDescending { it.updatedAt }
+            CompatApi.WorkspaceGroup(
+                // 取最后一段作组名；以 / 结尾时先去掉尾斜杠，否则会得到空名。
+                name = cwd.trimEnd('/').substringAfterLast('/'),
+                path = cwd,
+                sessions = sorted,
+            )
+        }
+        .sortedByDescending { it.latestAt }
 }

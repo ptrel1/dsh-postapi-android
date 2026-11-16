@@ -12,6 +12,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -21,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cd.ptrel.dshpostapi.ui.chat.followBottom
 import cd.ptrel.dshpostapi.ui.chat.rememberIsAtBottom
+import cd.ptrel.dshpostapi.ui.chat.scrollToBottom
 import cd.ptrel.dshpostapi.net.ModelInfo
 import cd.ptrel.dshpostapi.ui.chat.ContextStats
 import cd.ptrel.dshpostapi.ui.chat.InputBar
@@ -73,10 +75,30 @@ fun ChatScreen(
     val lastMessageLen = state.messages.lastOrNull()?.text?.length ?: 0
     val isAtBottom by rememberIsAtBottom(listState)
 
-    LaunchedEffect(state.messages.size, lastMessageLen) {
+    // ⚠️ v0.10.2：区分「首次定位」与「流式跟随」。
+    //
+    // 原来只有一个 LaunchedEffect 且都以 isAtBottom 为门槛 —— 首次进入时
+    // 列表刚拿到数据、还没滚动过，canScrollForward 为 true ⇒ isAtBottom=false
+    // ⇒ 直接 return，用户进来永远停在最上面。
+    //
+    // 首次定位必须**无条件**贴底：用户点进会话就是要看最新那句话，
+    // 不存在「他已经在上面读历史」这种情况。
+    var positioned by remember(state.sessionId) { mutableStateOf(false) }
+    LaunchedEffect(state.messages.size) {
         if (state.messages.isEmpty()) return@LaunchedEffect
-        // 用户主动上滑看历史时不要抢着滚回去 —— 那是「跟随」与「打扰」的分界。
-        // isAtBottom 为 false 说明用户已经在别处读了，新内容不该把他拽回来。
+        if (!positioned) {
+            // 等一帧让 LazyColumn 完成首次布局 —— 列表还没量出高度时
+            // scrollToItem 会被忽略（表现为「没滚动」）。
+            withFrameNanos { }
+            listState.scrollToBottom()
+            positioned = true
+            return@LaunchedEffect
+        }
+    }
+
+    // 流式跟随：只在用户本来就贴底时才滚，否则不打扰正在读历史的用户。
+    LaunchedEffect(lastMessageLen) {
+        if (state.messages.isEmpty() || !positioned) return@LaunchedEffect
         if (!isAtBottom) return@LaunchedEffect
         // followBottom 每帧吃掉剩余距离的 0.7（见 ScrollToBottom.kt 的长注释）：
         // 内容每 50ms 离散来一批，直接 scrollToItem 会变成「每 50ms 跳一个台阶」。

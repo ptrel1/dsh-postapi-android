@@ -646,4 +646,5 @@
     <string name="compat_menu_logout">退出登录</string>
     <string name="compat_menu_logout_confirm">退出后需要重新输入账号密码。确定吗？</string>
     <string name="compat_menu_cancel">取消</string>
+    <string name="compat_workspace_other">其他</string>
 </resources>

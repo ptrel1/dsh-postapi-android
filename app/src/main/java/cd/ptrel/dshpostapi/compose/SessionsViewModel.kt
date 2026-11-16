@@ -55,6 +55,32 @@ class SessionsViewModel(
     init {
         // 进页面就拉一次：与旧版 onCreate 里 load() 对齐。
         load()
+        startAutoRefresh()
+    }
+
+    /**
+     * 自动刷新（v0.10.2）。
+     *
+     * 为什么需要：早先只在进页面和 onResume 时拉一次。用户看着列表，
+     * 另一个会话在后台跑完了 / 有新消息了，列表**完全不会变** ——
+     * 必须退出重进才看得到。读屏用户尤其明显：他不知道有东西变了。
+     *
+     * 间隔 5 秒的取舍：
+     *   · 这个接口读的是 s.list({})（服务端内存里的摘要），很轻；
+     *   · 1 秒太频繁，用户看不出区别却持续耗电；
+     *   · 10 秒以上，一轮对话结束了列表还没反映过来，显得迟钝。
+     *
+     * 用 viewModelScope：ViewModel 销毁（离开页面）时自动取消，不用手写清理。
+     */
+    private fun startAutoRefresh() {
+        viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(5_000)
+                // 静默刷新：不置 loading（那会让界面闪一下加载圈），
+                // 不动 error（偶发失败不该把已有列表打成错误态）。
+                load(silent = true)
+            }
+        }
     }
 
     /**
@@ -64,7 +90,7 @@ class SessionsViewModel(
      * viewModelScope 默认在 Main 上跑，直接调会抛 NetworkOnMainThreadException
      * （聊天页踩过同一个坑，见 ChatScreenViewModel.openSession）。
      */
-    fun load() {
+    fun load(silent: Boolean = false) {
         _state.update { it.copy(loading = it.sessions.isEmpty()) }
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) { api.listSessions() }
