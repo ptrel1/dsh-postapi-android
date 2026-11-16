@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
@@ -143,7 +144,18 @@ fun ChatScreen(
                 .padding(padding)
                 // imePadding：键盘弹出时把输入区顶上去。
                 // 配合 manifest 的 adjustResize —— 缺一个键盘都会盖住输入框。
-                .imePadding(),
+                .imePadding()
+                // navigationBarsPadding：避开系统手势条 / 三键导航栏。
+                //
+                // ⚠️ 缺它时输入栏贴死在屏幕最底部，发送键压在手势条上
+                // （实测发送键 bounds=[929,2175][979,2225]，屏幕 2400 高、
+                //  手势条约 130~190px，两者重叠）。表现为「输入框紧贴底边、
+                //  点发送偶尔被系统手势抢走」。
+                //
+                // 加在 Column 而不是 InputBar：配合 weight(1f) 的 MessageList，
+                // 输入栏自然被抬到安全区之上，列表高度也同步缩短 —— 一处生效两处都对。
+                // 只加在 InputBar 上则列表仍会延伸到手势条下面（滚到底被遮）。
+                .navigationBarsPadding(),
         ) {
             MessageList(
                 messages = uiMessages,

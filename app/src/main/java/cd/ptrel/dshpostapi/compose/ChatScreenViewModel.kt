@@ -203,6 +203,14 @@ class ChatScreenViewModel(
             }
             when (result) {
                 is CompatApi.Result.Ok -> {
+                    // TEMP DIAG：确认 App 实际收到了多少条、内容是什么
+                    Log.i("ChatDiag", "openSession sid=" + sessionId +
+                        " messages=" + result.value.messages.size +
+                        " hasMore=" + result.value.hasMore)
+                    result.value.messages.take(3).forEachIndexed { i, m ->
+                        Log.i("ChatDiag", "  [$i] seq=" + m.seq + " role=" + m.role +
+                            " text=" + m.text.take(40).replace("\n", "\u21b5"))
+                    }
                     val list = result.value.messages.map { m ->
                         NetMessage(
                             id = nextId(if (m.role == "user") "u" else "a"),
