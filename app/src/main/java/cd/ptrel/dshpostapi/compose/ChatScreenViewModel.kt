@@ -64,6 +64,14 @@ class ChatScreenViewModel(
      * 持有 Activity 引用会泄漏。
      */
     private val appContext: android.content.Context,
+    /**
+     * 新建会话要用的工作区路径（v0.11.0）。
+     *
+     * DSH 的会话必须绑定 cwd —— 它决定 agent 在哪里执行命令、能读哪些文件。
+     * 空串 = 沿用服务端默认（本机 /tmp），只应在「没走工作区选择」的旧入口出现。
+     * 服务端会按白名单校验，非法值返回 403。
+     */
+    private val workspaceCwd: String = "",
 ) : ViewModel() {
 
     data class UiState(
@@ -88,9 +96,10 @@ class ChatScreenViewModel(
      * 本地回显先行：用户点发送后立刻看到自己的话，否则会以为没发出去。
      * 这是聊天类应用的通用预期，不是可选的优化。
      */
-    fun send(text: String) {
+    fun send(text: String, images: List<CompatApi.PendingImage> = emptyList()) {
         val trimmed = text.trim()
-        if (trimmed.isEmpty() || _state.value.busy) return
+        // v0.11.0：允许「只发图片不打字」——与宿主 hasPromptContent 的判据一致。
+        if ((trimmed.isEmpty() && images.isEmpty()) || _state.value.busy) return
 
         val userMsg = NetMessage(nextId("u"), NetMessage.Role.User, trimmed)
         val replyId = nextId("a")
@@ -104,7 +113,14 @@ class ChatScreenViewModel(
             )
         }
 
-        val request = api.streamRequest(trimmed, _state.value.sessionId)
+        val request = api.streamRequest(
+                        prompt = trimmed,
+                        sessionId = _state.value.sessionId,
+                        images = images,
+                        // 只在**新会话**时带 cwd：已有会话的 cwd 由它自己决定，
+                        // 再传一次要么被忽略、要么在服务端引发「改工作区」的歧义。
+                        cwd = if (_state.value.sessionId == null) workspaceCwd else null,
+                    )
         streamJob = viewModelScope.launch {
             streamClient.stream(request).collect { event ->
                 when (event) {

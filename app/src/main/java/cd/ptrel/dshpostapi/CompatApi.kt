@@ -39,6 +39,12 @@ class CompatApi(
 ) {
 
     companion object {
+
+        /** 宿主接受的图片格式（dsh-api-remotes/lib/client.js:1085）。 */
+        private val ALLOWED_IMAGE_MIME = setOf("image/png", "image/jpeg", "image/webp", "image/gif")
+
+        /** 单张图片上限，与插件侧保持一致。 */
+        private const val MAX_IMAGE_BYTES = 4 * 1024 * 1024
         private const val TAG = "CompatApi"
 
         /**
@@ -94,7 +100,52 @@ class CompatApi(
 
             return CompatApi(account.host, account.cookieName, account.cookieValue, context.cacheDir)
         }
-    }
+    
+        /**
+         * 把相册/相机返回的 Uri 读成 [PendingImage]（v0.11.0）。
+         *
+         * 三件事都在这里做，调用方不必关心：
+         *   ① **MIME 以 ContentResolver 为准**，不信文件扩展名 —— 宿主会校验字节，
+         *      扩展名和真实格式不符时整条消息会被拒；
+         *   ② **白名单过滤**：只收 png/jpeg/webp/gif，其余返回 null（UI 层提示不支持）；
+         *   ③ **大小上限 4MB**：与插件侧一致。超过就直接返回 null，
+         *      不要先编码再上传 —— base64 会让内存占用翻 1.33 倍，大图容易 OOM。
+         *
+         * ⚠️ 必须在 IO 线程调用：两次流式读取（拿大小 + 读字节）。
+         */
+        fun readImage(context: android.content.Context, uri: android.net.Uri): PendingImage? {
+            val resolver = context.contentResolver
+            val mime = resolver.getType(uri) ?: return null
+            if (mime !in ALLOWED_IMAGE_MIME) return null
+            // 先问大小，避免把一张 40MB 的原图整个读进内存
+            val size = resolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
+            if (size in 1..(MAX_IMAGE_BYTES + 1)) {
+                // ok：已知且在限额内
+            } else if (size > MAX_IMAGE_BYTES) {
+                return null
+            }
+            // 流式读取（size 未知时也只能这样）
+            val bytes = resolver.openInputStream(uri)?.use { input ->
+                val buf = java.io.ByteArrayOutputStream()
+                val chunk = ByteArray(64 * 1024)
+                var total = 0L
+                while (true) {
+                    val n = input.read(chunk)
+                    if (n <= 0) break
+                    total += n
+                    if (total > MAX_IMAGE_BYTES) return null   // 边读边判，超了立刻放弃
+                    buf.write(chunk, 0, n)
+                }
+                buf.toByteArray()
+            } ?: return null
+            val name = (uri.lastPathSegment ?: "image").substringAfterLast('/').take(120)
+            return PendingImage(
+                mediaType = mime,
+                base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP),
+                name = name,
+            )
+        }
+}
 
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -332,9 +383,92 @@ class CompatApi(
 
     fun newStreamingClient(): OkHttpClient = client
 
-    fun streamRequest(prompt: String, sessionId: String?): Request {
+    /**
+     * 待发送的图片（v0.11.0）。
+     *
+     * 协议来自宿主 dsh-api-remotes/lib/client.js:1083 —— prompt 的 content 接受
+     *   { type:'image', mediaType, data:'<canonical base64>', name? }
+     * 宿主会**校验声明的 mediaType 与解码后的字节是否一致**，所以 mediaType 不能瞎猜，
+     * 必须来自系统返回的 MIME（下面 fromUri 用 contentResolver.getType）。
+     */
+    data class PendingImage(
+        val mediaType: String,
+        val base64: String,
+        val name: String,
+    )
+
+
+
+    /**
+     * 一个可选的工作区（v0.11.0）。
+     *
+     * DSH 的会话**必须绑定 cwd** —— 它决定 agent 在哪里执行命令、能读哪些文件。
+     * 早先客户端的「新建会话」不带 cwd，服务端对非回环请求一律用 /tmp，
+     * 于是新会话没有项目上下文（工具全在 /tmp 下跑）。
+     */
+    data class Workspace(
+        val path: String,
+        val name: String,
+        val sessions: Int,
+        val lastActiveAt: Long,
+    )
+
+    /**
+     * 拉取允许选择的工作区列表。
+     *
+     * 服务端只返回「**已有会话用过**」的 cwd —— 这天然就是用户自己的目录。
+     * 不支持任意路径：cwd 决定 agent 的工作目录，传 /etc 就等于把任意目录交给模型。
+     */
+    fun listWorkspaces(): Result<List<Workspace>> {
+        val req = Request.Builder()
+            .url(hostBaseUrl.trimEnd('/') + API_PREFIX + "/workspaces")
+            .header("Cookie", cookieHeader())
+            .header("User-Agent", MOBILE_UA)
+            .get()
+            .build()
+        return exec(req) { body ->
+            val arr = body.optJSONArray("items") ?: org.json.JSONArray()
+            val out = ArrayList<Workspace>(arr.length())
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                val path = o.optString("path", "")
+                if (path.isEmpty()) continue
+                out.add(
+                    Workspace(
+                        path = path,
+                        name = o.optString("name", "").ifEmpty { path.substringAfterLast('/') },
+                        sessions = o.optInt("sessions", 0),
+                        lastActiveAt = o.optLong("lastActiveAt", 0L),
+                    ),
+                )
+            }
+            out
+        }
+    }
+
+    fun streamRequest(
+        prompt: String,
+        sessionId: String?,
+        images: List<PendingImage> = emptyList(),
+        cwd: String? = null,
+    ): Request {
         val json = JSONObject().put("prompt", prompt)
         if (!sessionId.isNullOrEmpty()) json.put("sessionId", sessionId)
+        // 新会话的工作区（v0.11.0）。服务端按「已有会话用过的 cwd」白名单校验，
+        // 不在白名单内返回 403 —— 不信任客户端传的任意路径。
+        if (!cwd.isNullOrBlank()) json.put("cwd", cwd)
+        if (images.isNotEmpty()) {
+            val arr = org.json.JSONArray()
+            images.forEach { img ->
+                arr.put(
+                    JSONObject()
+                        .put("mediaType", img.mediaType)
+                        .put("data", img.base64)
+                        .put("name", img.name),
+                )
+            }
+            json.put("images", arr)
+        }
         return Request.Builder()
             .url(hostBaseUrl.trimEnd('/') + API_PREFIX + "/chat/stream")
             .header("Cookie", cookieHeader())

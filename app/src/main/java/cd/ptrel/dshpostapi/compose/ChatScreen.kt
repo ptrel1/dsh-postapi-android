@@ -11,6 +11,14 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import cd.ptrel.dshpostapi.CompatApi
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.withFrameNanos
@@ -76,6 +84,38 @@ fun ChatScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     var input by remember { mutableStateOf("") }
+
+    // ---- 待发送图片（v0.11.0）----
+    // 读成 PendingImage 而不是留着 Uri：
+    //   ① Uri 的临时授权可能过期（尤其从相册选完、切后台再回来）；
+    //   ② 发送瞬间才读取会让「点发送」卡一下（几 MB 的 base64 编码）；
+    //   ③ 提前读出来还能立刻按大小/格式拒掉，用户当场就知道，不用等发送失败。
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var pendingImages by remember { mutableStateOf<List<CompatApi.PendingImage>>(emptyList()) }
+    var imageError by remember { mutableStateOf<String?>(null) }
+
+    // ⚠️ 用 GetContent（不是 PickVisualMedia）：后者需要 activity-result 库，
+    //    本项目没引。GetContent 是标准 API，且允许用户从「最近/相册/文件」任选来源。
+    val pickImage = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            // 读盘 + base64 编码必须在 IO 线程 —— 一张 4MB 的图在主线程编码会明显卡顿
+            val img = withContext(Dispatchers.IO) { CompatApi.readImage(context, uri) }
+            if (img == null) {
+                // 失败原因只有两种：格式不支持 / 文件太大。合并成一句，
+                // 用户不需要区分（两者都是「换一张」）。
+                imageError = "图片无法添加（仅支持 PNG/JPEG/WebP/GIF，且不超过 4MB）"
+            } else if (pendingImages.size >= MAX_PENDING_IMAGES) {
+                imageError = "最多一次发送 " + MAX_PENDING_IMAGES + " 张图片"
+            } else {
+                pendingImages = pendingImages + img
+                imageError = null
+            }
+        }
+    }
 
     // ---- 贴底跟随（v0.10.1 修正）----
     //
@@ -155,7 +195,27 @@ fun ChatScreen(
                 // 加在 Column 而不是 InputBar：配合 weight(1f) 的 MessageList，
                 // 输入栏自然被抬到安全区之上，列表高度也同步缩短 —— 一处生效两处都对。
                 // 只加在 InputBar 上则列表仍会延伸到手势条下面（滚到底被遮）。
-                .navigationBarsPadding(),
+                .navigationBarsPadding()
+                // ⚠️ 再补一段固定底部间距（v0.11.1）。
+                //
+                // 为什么不能只靠 insets：insets 是**设备相关**的 ——
+                //   · 手机手势条 ≈ 48~72dp，`navigationBarsPadding` 已经留够；
+                //   · 平板/模拟器三键或全面屏手势关闭时 insets = 0，
+                //     输入栏就直接压在屏幕物理底边上，视觉上「贴着底」。
+                // 同一份代码在两种设备上得到两种观感，这是 insets 的固有属性，
+                // 不是 bug。补一个**与设备无关**的最小底部留白即可对齐观感。
+                //
+                // 底部留白 = 左右留白（v0.11.1 用户要求「三边视觉等距」）。
+                //
+                // 关键在于**自动跟随**而不是硬编码：
+                //   左右留白由 [ChatSidePadding] 决定，这里用同一个值，
+                //   两处不会失同步（早先两处各写 16/12，就出现了「底下偏挤」）。
+                //
+                // 为什么不直接用 navigationBarsPadding 的下沿：
+                //   那是**设备相关**的（手机手势条 48~72dp、平板三键 0），
+                //   insets 为 0 时卡片会直接压到屏幕物理底边。
+                //   左右留白是**设计常量**，用它与底部对齐才在任何设备上观感一致。
+                .padding(bottom = ChatSidePadding),
         ) {
             MessageList(
                 messages = uiMessages,
@@ -170,7 +230,7 @@ fun ChatScreen(
                 // 而不是「存在但点了没反应」。
             )
 
-            state.error?.let { err ->
+            (imageError ?: state.error)?.let { err ->
                 Text(
                     text = err,
                     color = MaterialTheme.colorScheme.error,
@@ -190,14 +250,18 @@ fun ChatScreen(
                 onOpenSettingsPanel = {},
                 streaming = state.busy,
                 onSend = {
-                    viewModel.send(input)
+                    viewModel.send(input, pendingImages)
                     input = ""
+                    pendingImages = emptyList()
+                    imageError = null
                 },
                 onStop = { viewModel.stop() },
-                // 附件是后续需求，先隐藏入口 ——
-                // 显示一个点了没反应的按钮比不显示更糟。
-                canAttach = false,
-                onAttachClick = {},
+                canAttach = true,
+                // v0.11.0：⊕ 打开系统图片选择器。
+                // （不做「图片/文件」二级面板 —— 目前只支持图片，多一层选择是多余的点击。
+                //   将来支持任意文件时再加面板。）
+                onAttachClick = { pickImage.launch("image/*") },
+                pendingCount = pendingImages.size,
                 // 对话设置 / 思考档位 / 模型选择都是 SimpleChat 的概念，
                 // DSH 侧由服务端决定，客户端没有对应面板。
                 // 早先传空 lambda 导致按钮渲染出来但点了没反应（用户反馈)。
@@ -210,6 +274,20 @@ fun ChatScreen(
         }
     }
 }
+
+/**
+ * 聊天页的水平 / 底部留白（v0.11.1）。
+ *
+ * 一处定义、两处使用：InputBar 的水平内边距 + 本页的底部内边距。
+ * 这样「卡片到屏幕左/右/底三边等距」由结构保证，而不是靠两个常量碰巧相等。
+ *
+ * ⚠️ 改这里之前先想清楚：它同时决定消息区的左右边距（MessageList 的 contentPadding
+ *    另有一份，若要严格对齐需一并改）。
+ */
+private val ChatSidePadding = 16.dp
+
+/** 一次最多带几张图。插件侧也是 4（超出会被丢弃并记日志）。 */
+private const val MAX_PENDING_IMAGES = 4
 
 /** 没有上下文统计时的零值。 */
 private val EMPTY_CONTEXT_STATS = ContextStats(

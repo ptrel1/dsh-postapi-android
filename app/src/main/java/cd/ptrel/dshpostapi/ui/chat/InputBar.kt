@@ -234,7 +234,11 @@ fun InputBar(
                     }
                 }
                 .border(1.dp, colors.outline, shape)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                // v0.11.1：vertical 12dp → 8dp。
+                // 实测一行文字时卡片高 187px（≈71dp），比微信那类「一行胶囊」厚不少 ——
+                // 用户反馈「输入框太高」。水平 16dp 保持不动：它决定卡片到屏幕左右的距离，
+                // 与 ChatScreen 的 bottom padding 一起构成视觉等距。
+                .padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
             // ── 「修改输入」标题行 ─────────────────────────
             if (editingLabel != null) {

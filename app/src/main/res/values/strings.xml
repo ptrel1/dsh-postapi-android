@@ -647,4 +647,8 @@
     <string name="compat_menu_logout_confirm">退出后需要重新输入账号密码。确定吗？</string>
     <string name="compat_menu_cancel">取消</string>
     <string name="compat_workspace_other">其他</string>
+    <!-- v0.11.0：新建会话选择工作区 -->
+    <string name="compat_workspace_pick">选择工作区</string>
+    <string name="compat_workspace_loading">正在加载工作区…</string>
+    <string name="compat_workspace_empty">还没有任何工作区。请先在完整模式里创建一次会话。</string>
 </resources>

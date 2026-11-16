@@ -58,8 +58,12 @@ class ComposeChatActivity : ComponentActivity() {
         // 用户对「打开 App」的预期是接着上次聊，不是又开一段。
         // 标题由会话列表传入（v0.10.3）：它有现成的值，这一页不该再请求一次。
         val sessionTitle = intent.getStringExtra(EXTRA_SESSION_TITLE).orEmpty()
+        // 新建会话时选好的工作区（v0.11.0）。有值就发给服务端，它按白名单校验。
+        val workspaceCwd = intent.getStringExtra(EXTRA_CWD).orEmpty()
+        val explicitNew = intent.getBooleanExtra(EXTRA_NEW_SESSION, false)
         val sessionId = intent.getStringExtra(EXTRA_SESSION_ID)
-            ?: cd.ptrel.dshpostapi.AppPrefs.getLastSessionId(this)
+            // 明确新建时**不**回退到上次会话（见 EXTRA_NEW_SESSION 的说明）。
+            ?: if (explicitNew) null else cd.ptrel.dshpostapi.AppPrefs.getLastSessionId(this)
         val streamClient = DshStreamClient(okHttpOf(api))
 
         setContent {
@@ -74,7 +78,7 @@ class ComposeChatActivity : ComponentActivity() {
                     factory = object : ViewModelProvider.Factory {
                         @Suppress("UNCHECKED_CAST")
                         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                            return ChatScreenViewModel(api, streamClient, applicationContext) as T
+                            return ChatScreenViewModel(api, streamClient, applicationContext, workspaceCwd) as T
                         }
                     },
                 )
@@ -155,5 +159,15 @@ class ComposeChatActivity : ComponentActivity() {
     companion object {
         const val EXTRA_SESSION_ID = "session_id"
         const val EXTRA_SESSION_TITLE = "session_title"
+        const val EXTRA_CWD = "cwd"
+        /**
+         * 明确表示「这是一个新会话」（v0.11.0）。
+         *
+         * 为什么需要单独的标记：sessionId 为空有两种含义 ——
+         *   ① 从桌面图标启动 → 应该回退到上次会话（用户预期是「接着聊」）；
+         *   ② 用户主动点了「新建会话」→ 必须**开新的**，不能回退。
+         * 只看 sessionId 无法区分，实测导致「选完工作区却进了旧会话」。
+         */
+        const val EXTRA_NEW_SESSION = "new_session"
     }
 }

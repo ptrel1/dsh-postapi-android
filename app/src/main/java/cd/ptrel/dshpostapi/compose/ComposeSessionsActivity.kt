@@ -102,7 +102,10 @@ class ComposeSessionsActivity : ComponentActivity() {
                     onRefresh = vm::load,
                     onRetry = vm::retry,
                     onOpenSession = { row -> openChat(row.sessionId, row.title) },
-                    onNewSession = { openChat(null) },
+                    // v0.11.0：新建会话先选工作区（DSH 的会话必须绑定 cwd）。
+                    // 早先直接 openChat(null)，服务端对非回环请求一律用 /tmp，
+                    // 于是新会话没有项目上下文 —— 工具全在 /tmp 下跑，用户看不到自己的代码。
+                    onNewSession = { pickWorkspaceThenChat() },
                     onSwitchMode = ::switchToFullMode,
                     onCheckUpdate = { Updates.checkManually(this@ComposeSessionsActivity) },
                     onLogout = { logoutConfirm = true },
@@ -145,10 +148,69 @@ class ComposeSessionsActivity : ComponentActivity() {
     // ==========================================================================
 
     /** 进聊天页。sessionId 为 null = 新会话。 */
-    private fun openChat(sessionId: String?, title: String? = null) {
+    /**
+     * 新建会话第一步：选工作区（v0.11.0）。
+     *
+     * 为什么必须选：DSH 的 cwd 决定 agent 在哪里执行命令、能读哪些文件。
+     * 不选就等于在一个空目录里干活 —— 用户看不到自己的代码，工具也找不到项目。
+     *
+     * 为什么用 AlertDialog 而不是单独一个 Activity：
+     *   它只是一次性选择，没有后续交互，开新页面反而多一层返回栈。
+     * 列表项 = 工作区名 + 完整路径 + 会话数，与列表页的分组标题同构，
+     * 用户看两处是同一套概念。
+     */
+    private fun pickWorkspaceThenChat() {
+        // 拉列表要网络，不能在主线程 —— 与 SessionsViewModel.load 同一个坑。
+        val api = CompatApi.fromStore(this) ?: run {
+            Toast.makeText(this, R.string.compat_not_logged_in, Toast.LENGTH_LONG).show()
+            redirectToLogin()
+            return
+        }
+        val progress = android.app.ProgressDialog(this).apply {
+            setMessage(getString(R.string.compat_workspace_loading))
+            setCancelable(true)
+            show()
+        }
+        Thread {
+            val result = api.listWorkspaces()
+            runOnUiThread {
+                progress.dismiss()
+                when (result) {
+                    is CompatApi.Result.Ok -> {
+                        val list = result.value
+                        if (list.isEmpty()) {
+                            // 没有工作区 = 从没建过会话。提示而不是给一个空对话框。
+                            Toast.makeText(this, R.string.compat_workspace_empty, Toast.LENGTH_LONG).show()
+                            return@runOnUiThread
+                        }
+                        val labels = list.map { w -> w.name + "  (" + w.sessions + ")\n" + w.path }.toTypedArray()
+                        androidx.appcompat.app.AlertDialog.Builder(this)
+                            .setTitle(R.string.compat_workspace_pick)
+                            .setItems(labels) { _, which ->
+                                openChat(null, null, list[which].path)
+                            }
+                            .setNegativeButton(R.string.compat_menu_cancel, null)
+                            .show()
+                    }
+                    is CompatApi.Result.Err -> {
+                        Toast.makeText(this, result.reason, Toast.LENGTH_LONG).show()
+                        if (result.code == 401 || result.code == 403) redirectToLogin()
+                    }
+                }
+            }
+        }.start()
+    }
+
+    private fun openChat(sessionId: String?, title: String? = null, cwd: String? = null) {
         startActivity(
             Intent(this, ComposeChatActivity::class.java).apply {
                 if (sessionId != null) putExtra(ComposeChatActivity.EXTRA_SESSION_ID, sessionId)
+                // v0.11.0：新建会话带上选好的工作区；服务端会用白名单校验它。
+                if (!cwd.isNullOrBlank()) putExtra(ComposeChatActivity.EXTRA_CWD, cwd)
+                // v0.11.0：**明确新建**。没有这个标记时，聊天页会把
+                // 「sessionId 为空」理解成「从桌面图标启动」并回退到上次会话 ——
+                // 实测点了工作区却进了旧会话。
+                if (sessionId == null) putExtra(ComposeChatActivity.EXTRA_NEW_SESSION, true)
                 // 标题一起带过去（v0.10.4）：列表页已经有它了，
                 // 聊天页再请求一次既慢又可能拿到不一致的值（列表快照 vs 服务端最新）。
                 // 空标题不必传 —— 聊天页会对空串显示占位文案。
