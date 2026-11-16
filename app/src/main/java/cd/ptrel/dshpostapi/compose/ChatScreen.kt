@@ -346,6 +346,12 @@ fun ChatScreen(
                 //   将来支持任意文件时再加面板。）
                 onAttachClick = { pickImage.launch("image/*") },
                 pendingCount = pendingImages.size,
+                // v0.13.2：把图片内容交给输入栏显示缩略图。
+                // 之前只传数量，界面上看不到任何东西 —— 用户以为没选上。
+                pendingImages = pendingImages.map { it.base64 to it.name },
+                onRemovePendingImage = { idx ->
+                    pendingImages = pendingImages.filterIndexed { i, _ -> i != idx }
+                },
                 // 对话设置 / 思考档位 / 模型选择都是 SimpleChat 的概念，
                 // DSH 侧由服务端决定，客户端没有对应面板。
                 // 早先传空 lambda 导致按钮渲染出来但点了没反应（用户反馈)。

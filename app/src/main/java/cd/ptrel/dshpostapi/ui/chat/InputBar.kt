@@ -3,6 +3,15 @@ package cd.ptrel.dshpostapi.ui.chat
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.asImageBitmap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.compose.foundation.Image
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -122,6 +131,21 @@ fun InputBar(
     attachPanelOpen: Boolean = false,
     /** 已挂上的附件数量。>0 时即使没打字也允许发送。 */
     pendingCount: Int = 0,
+    /**
+     * 已选图片的缩略图（v0.13.2）。
+     *
+     * ## 为什么必须显示
+     *
+     * 之前只有 pendingCount —— 它只用来判断「发送按钮能不能点」。
+     * 用户选完图后界面上**什么变化都没有**（只有按钮从灰变亮，很容易忽略），
+     * 于是以为图没选上（这是用户实际反馈的「图片选择了之后没进框」）。
+     *
+     * 每一项是 (base64, 显示名)。base64 直接用来解码缩略图 ——
+     * 图片本来就要以 base64 发给服务端，不必为了预览再存一份文件。
+     */
+    pendingImages: List<Pair<String, String>> = emptyList(),
+    /** 点缩略图右上角的 ✕ 移除这张。 */
+    onRemovePendingImage: (Int) -> Unit = {},
     onTextFieldFocused: () -> Unit = {},
     /** 非空即处于「修改输入」态：顶部显示该标题 + 取消按钮。 */
     editingLabel: String? = null,
@@ -240,6 +264,40 @@ fun InputBar(
                 // 与 ChatScreen 的 bottom padding 一起构成视觉等距。
                 .padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
+            // ── 已选图片缩略图（v0.13.2）───────────────────
+            //
+            // 之前完全没有预览，用户选完图看不到任何变化，以为没选上。
+            // 放在输入框**上方**而不是里面：输入框是可滚动的文本区，
+            // 塞进去会随文本一起滚走，图片就跑到视野外了。
+            if (pendingImages.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 6.dp)
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    pendingImages.forEachIndexed { index, item ->
+                        Box {
+                            PendingThumb(b64 = item.first, contentDescription = item.second)
+                            // 移除按钮压在右上角：选错图要能去掉，
+                            // 否则只能清空整条输入重新选。
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .size(18.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.Black.copy(alpha = 0.55f))
+                                    .clickable { onRemovePendingImage(index) },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text("×", color = Color.White, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
             // ── 「修改输入」标题行 ─────────────────────────
             if (editingLabel != null) {
                 Row(
@@ -681,4 +739,43 @@ fun IconAction(
         iconSize = 24.dp,
         tint = tint,
     )
+}
+
+/**
+ * 一张待发图片的缩略图（v0.13.2）。
+ *
+ * 直接用 base64 解码而不是先落盘再读：图片本来就要以 base64 发给服务端，
+ * 为了预览再存一份文件等于双倍占用，且要处理清理。
+ *
+ * 解码在 IO 线程；失败时显示一个灰块占位 —— 缩略图出不来不影响发送。
+ */
+@Composable
+private fun PendingThumb(b64: String, contentDescription: String) {
+    var bmp by remember(b64) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    LaunchedEffect(b64) {
+        bmp = withContext(Dispatchers.IO) {
+            try {
+                val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+    Box(
+        modifier = Modifier
+            .size(56.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center,
+    ) {
+        bmp?.let {
+            androidx.compose.foundation.Image(
+                bitmap = it,
+                contentDescription = contentDescription,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
 }
