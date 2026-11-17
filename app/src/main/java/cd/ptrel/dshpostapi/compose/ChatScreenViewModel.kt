@@ -126,6 +126,15 @@ class ChatScreenViewModel(
      * 每次收到 TurnStart 就换一个新 id —— 多轮不能复用同一条消息，
      * 否则第二轮会追加到第一轮上面（见 [appendExternal] 的注释）。
      */
+    /**
+     * 观察流连续失败多少次后放弃（v0.15.9）。
+     *
+     * 取 8：按 2/4/8/16/30/30/30/30 秒退避，总共约 2.5 分钟。
+     * 够覆盖「服务端重启」（通常几十秒）这类可恢复故障，
+     * 又不至于在永久故障时无限重试。
+     */
+    private val MAX_WATCH_RETRY = 8
+
     private var externalTurnSeq = 0
     private var currentExternalId: String = "external-0"
     private var seq = 0L
@@ -250,7 +259,20 @@ class ChatScreenViewModel(
                 }
                 if (!isActive) break
                 attempt++
-                kotlinx.coroutines.delay(if (attempt < 3) 2_000L else 10_000L)
+                // v0.15.9：指数退避 + 上限，超限后停止重连。
+                //
+                // 早先是 `if (attempt < 3) 2s else 10s` —— 服务端**永久不可用**
+                // （端点被移除、反代配置错了）时会每 10 秒重试一次，无限重试。
+                // 那既无意义（不会自己好起来）又费电，还会在服务端日志里刷屏。
+                //
+                // 现在：2s → 4s → 8s → 16s → 30s（封顶），连续失败 MAX_WATCH_RETRY 次后停止。
+                // 用户切走再回来（openSession 重新调用）会重置计数 —— 那是明确的"重试意图"。
+                if (attempt > MAX_WATCH_RETRY) {
+                    android.util.Log.w("WatchDiag", "give up watching after " + attempt + " attempts")
+                    break
+                }
+                val backoffMs = (2_000L shl (attempt - 1).coerceAtMost(5)).coerceAtMost(30_000L)
+                kotlinx.coroutines.delay(backoffMs)
             }
         }
     }
