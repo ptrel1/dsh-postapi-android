@@ -184,6 +184,16 @@ fun InputBar(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalChatColors.current
+    // v0.17.0：玻璃底色。OFF 档时保持原样（不透明），避免「关了玻璃还是一样」的困惑。
+    val glassQuality = cd.ptrel.dshpostapi.ui.common.rememberGlassQuality()
+    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val glassTint = if (glassQuality == cd.ptrel.dshpostapi.ui.common.GlassQuality.OFF) {
+        colors.card
+    } else if (isDark) {
+        colors.card.copy(alpha = 0.72f)
+    } else {
+        colors.card.copy(alpha = 0.78f)
+    }
     val shape = ContainerShape
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -240,7 +250,15 @@ fun InputBar(
                     spotColor = AppShadow.PanelSpot,
                 )
                 .clip(shape)
-                .background(colors.card)
+                // v0.17.0：输入栏改玻璃底。
+                //
+                // 原来是 colors.card（不透明卡片色），叠在壁纸上像一块贴纸。
+                // 玻璃底让壁纸透出来，同时保留原有的圆角与投影 ——
+                // 投影在外层 shadow 上，这里只管填充。
+                //
+                // 注意：输入栏在滚动时**位置不变**（固定在底部），
+                // 所以它的模糊结果同样可以长期缓存 —— 与顶栏一样是静态受益者。
+                .background(glassTint)
                 /*
                  * 按住说话：挂在**整条输入栏**上，而不是输入框上。
                  *
@@ -813,3 +831,5 @@ private fun PendingThumb(b64: String, contentDescription: String) {
         }
     }
 }
+
+private fun Color.luminance(): Float = 0.299f * red + 0.587f * green + 0.114f * blue

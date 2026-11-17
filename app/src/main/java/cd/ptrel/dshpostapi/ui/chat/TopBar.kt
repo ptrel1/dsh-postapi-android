@@ -3,6 +3,7 @@ package cd.ptrel.dshpostapi.ui.chat
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import cd.ptrel.dshpostapi.ui.common.GlassSurface
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -30,8 +31,19 @@ fun ChatTopBar(
     onNewChat: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // v0.17.0：顶栏变成玻璃表面。
+    //
+    // 顶栏背后是壁纸的**固定区域**（不随滚动变化），所以它的模糊结果可以长期缓存 ——
+    // 这是 GlassSurface 里「静态区域不重算」策略最典型的受益者。
+    //
+    // cornerRadius = 0：顶栏贴边，圆角会把屏幕边角露出来。
+    GlassSurface(
+        modifier = modifier.fillMaxWidth(),
+        cornerRadius = 0.dp,
+        tintAlpha = 0.62f,
+    ) {
     Row(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxWidth()
             .statusBarsPadding()
             .height(56.dp)
@@ -52,6 +64,7 @@ fun ChatTopBar(
         // 圆圈加号留给输入栏的附件按钮（⊕ 加图片/文件），两者别混用。
         TopBarAction(AppIcons.MessageSquarePlus, stringResource(R.string.topbar_new_chat), onNewChat)
     }
+    }  // GlassSurface
 }
 
 /** 顶栏图标按钮，48dp 触控目标。 */

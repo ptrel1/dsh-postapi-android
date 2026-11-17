@@ -205,6 +205,42 @@ object AppPrefs {
         }
     }
 
+
+    // ── 玻璃质感档位（v0.17.0）─────────────────────────────────
+    //
+    // 三档，默认 MEDIUM（模糊 + 高光）：
+    //   HIGH   —— API 33+ 用 AGSL 边缘折射（真液体玻璃）
+    //   MEDIUM —— API 31+ 用 Modifier.blur() 磨砂，老设备退化为半透明
+    //   OFF    —— 纯半透明 + 边框，零 GPU 开销
+    //
+    // 为什么给 OFF：老设备（API < 31，或 GPU 弱）上磨砂每帧一次 blur，
+    // 流式输出时能明显掉帧。用户需要能关掉。
+    const val KEY_GLASS_QUALITY = "glass_quality"
+
+    /** 玻璃质感档位。存的是档位名而不是序号 —— 以后加档位不打乱旧值。 */
+    fun getGlassQuality(context: Context): String {
+        return try {
+            val prefs = open(context) ?: return GLASS_MEDIUM
+            prefs.getString(KEY_GLASS_QUALITY, GLASS_MEDIUM) ?: GLASS_MEDIUM
+        } catch (e: Exception) {
+            Log.w(TAG, "read glass_quality failed (" + e.javaClass.simpleName + ")")
+            GLASS_MEDIUM
+        }
+    }
+
+    fun setGlassQuality(context: Context, quality: String): Boolean {
+        return try {
+            val prefs = open(context) ?: return false
+            prefs.edit().putString(KEY_GLASS_QUALITY, quality).commit()
+        } catch (e: Exception) {
+            Log.w(TAG, "write glass_quality failed (" + e.javaClass.simpleName + ")")
+            false
+        }
+    }
+
+    const val GLASS_HIGH = "high"
+    const val GLASS_MEDIUM = "medium"
+    const val GLASS_OFF = "off"
     fun getLastSessionId(context: Context): String? {
         return try {
             val prefs = open(context) ?: return null
