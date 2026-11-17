@@ -119,6 +119,15 @@ class ChatScreenViewModel(
     private var streamJob: Job? = null
     /** 观察流（/chat/watch）的作业；换会话或开始发送时取消。 */
     private var watchJob: Job? = null
+
+    /**
+     * 当前「外部轮」的消息 id 与序号（v0.15.8）。
+     *
+     * 每次收到 TurnStart 就换一个新 id —— 多轮不能复用同一条消息，
+     * 否则第二轮会追加到第一轮上面（见 [appendExternal] 的注释）。
+     */
+    private var externalTurnSeq = 0
+    private var currentExternalId: String = "external-0"
     private var seq = 0L
 
     /** 生成本地 id。用自增序号而不是 UUID：可读、可测、排序天然稳定。 */
@@ -181,6 +190,11 @@ class ChatScreenViewModel(
                                 reload()
                             }
                             is WatchFrame.Text -> {
+                                // v0.15.8：一有正文输出就说明提问已被处理，顺手关弹窗
+                                // （不是所有轮次都会发 turn-end）。
+                                if (_state.value.pendingQuestion != null) {
+                                    _state.update { it.copy(pendingQuestion = null) }
+                                }
                                 // v0.15.5：本端正在发送时，这条 Text 是本端自己那轮的回声 ——
                                 // 已经由 /chat/stream 追加进正文了，这里再加一遍会重复。
                                 //
@@ -194,6 +208,9 @@ class ChatScreenViewModel(
                             // 注意不置 busy=true 会覆盖本端发送：本端发送时 watch 是被暂停的
                             //（startWatching 里 `if (busy) { delay; continue }`），所以不会打架。
                             is WatchFrame.TurnStart -> {
+                                // v0.15.8：每轮开始换新消息 id —— 多轮不能拼在同一条上。
+                                externalTurnSeq++
+                                currentExternalId = "external-" + externalTurnSeq
                                 if (!_state.value.busy) {
                                     _state.update {
                                         it.copy(busy = true, busyStartedAt = android.os.SystemClock.elapsedRealtime())
@@ -201,7 +218,20 @@ class ChatScreenViewModel(
                                 }
                             }
                             is WatchFrame.TurnEnd -> {
-                                // 只清掉「外部轮」的 busy：本端那条流的 busy 由 send() 自己收尾。
+                                // v0.15.8：先把这条外部消息收尾，再清 busy ——
+                                // 否则它一直停在 Streaming，下一轮的 Text 会追加上去。
+                                finishExternal()
+                                // v0.15.8：本轮结束说明提问已被回答（或取消）—— 关掉弹窗。
+                                //
+                                // 服务端只在**发现**待答问题时推 questions 帧，从不通知「已关闭」；
+                                // 而「本轮继续/结束」本身就是问题已解决的最可靠信号：
+                                // ask_user_question 是阻塞式的，answered 之后 agent 才会往下走。
+                                //
+                                // 不关的后果：用户在网页端答完，App 的弹窗永远悬在那儿。
+                                _state.update { st ->
+                                    if (st.pendingQuestion == null) st
+                                    else st.copy(pendingQuestion = null)
+                                }
                                 if (_state.value.busy) {
                                     _state.update { it.copy(busy = false, busyStartedAt = 0L) }
                                 }
@@ -227,17 +257,29 @@ class ChatScreenViewModel(
 
     private fun frameText(f: WatchFrame.Text): String = f.text
 
-    /** 追加到「外部流式消息」；没有就创建一条。 */
+    /**
+     * 追加到「外部流式消息」；没有就创建一条。
+     *
+     * ## 为什么 id 不再用固定的 "__external__"（v0.15.8 修）
+     *
+     * 固定 id 时，外部**连续跑两轮**会出问题：
+     *   第一轮创建了 id=__external__ 的占位，一直停在 Streaming；
+     *   第二轮继续往**同一条**追加，两轮的正文被拼成一段，
+     *   而且那条消息永远不会变成 Done。
+     *
+     * 现在每轮用新 id（由 [externalTurnSeq] 递增），
+     * 并在 TurnEnd 时把当前那条收尾。
+     */
     private fun appendExternal(text: String) {
         _state.update { st ->
             val list = st.messages
             val last = list.lastOrNull()
-            if (last != null && last.id == "__external__" && last.status == NetMessage.Status.Streaming) {
+            if (last != null && last.id == currentExternalId && last.status == NetMessage.Status.Streaming) {
                 st.copy(messages = list.dropLast(1) + last.copy(text = last.text + text))
             } else if (text.isNotEmpty()) {
                 st.copy(
                     messages = list + NetMessage(
-                        "__external__",
+                        currentExternalId,
                         NetMessage.Role.Assistant,
                         text,
                         status = NetMessage.Status.Streaming,
@@ -246,6 +288,27 @@ class ChatScreenViewModel(
             } else {
                 st
             }
+        }
+    }
+
+    /**
+     * 把当前这条外部流式消息收尾（TurnEnd 时调用）。
+     *
+     * 不收尾的后果：它一直是 Streaming 状态，
+     * 后续轮次的 Text 会被追加到它上面（见 [appendExternal] 的判据），
+     * 表现为多轮内容混成一条。
+     */
+    private fun finishExternal() {
+        _state.update { st ->
+            st.copy(
+                messages = st.messages.map {
+                    if (it.id == currentExternalId && it.status == NetMessage.Status.Streaming) {
+                        it.copy(status = NetMessage.Status.Done)
+                    } else {
+                        it
+                    }
+                },
+            )
         }
     }
 
