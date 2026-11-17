@@ -325,7 +325,9 @@ fun DeepDivingLabel(
     ) {
         androidx.compose.material3.Text(
             // 与官方文案一致：「深度求索中，用时 12s ·」+ 两点由 BusyDots 补
-            text = "深度求索中，用时 " + elapsedSec + "s ·",
+            // v0.15.6：官方时长格式 "53秒" / "1分3秒"（i18n duration.seconds/compactMinutes）。
+            // 早先写的是 "53s"，与官方不一致。
+            text = "深度求索中，用时 " + formatRunDuration(elapsedSec) + " ·",
             style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
             color = color,
         )

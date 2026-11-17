@@ -13,7 +13,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.fillMaxSize
 import cd.ptrel.dshpostapi.ui.common.DeepDivingLabel
-import cd.ptrel.dshpostapi.ui.common.WhaleSpinner
+import cd.ptrel.dshpostapi.ui.common.WhaleTail
 import cd.ptrel.dshpostapi.ui.common.BusyDots
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -483,11 +483,7 @@ fun InputBar(
                  *   · 兜底要克制，不能喧宾夺主
                  */
                 if (streaming) {
-                    WhaleSpinner(
-                        size = 18.dp,
-                        swishing = true,
-                        color = colors.processText,
-                    )
+                    WhaleTail(size = 16.dp, swishing = true)
                     Spacer(Modifier.width(8.dp))
                 }
                 Spacer(Modifier.weight(1f))

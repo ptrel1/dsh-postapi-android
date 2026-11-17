@@ -69,7 +69,8 @@ import cd.ptrel.dshpostapi.ui.markdown.MarkdownText
 import cd.ptrel.dshpostapi.ui.markdown.MarkdownWithMath
 import cd.ptrel.dshpostapi.ui.theme.ChatColors
 import cd.ptrel.dshpostapi.ui.common.DeepDivingLabel
-import cd.ptrel.dshpostapi.ui.common.WhaleSpinner
+import cd.ptrel.dshpostapi.ui.common.WhaleTail
+import cd.ptrel.dshpostapi.ui.common.deepDivingColor
 import cd.ptrel.dshpostapi.compose.NetMessage
 import cd.ptrel.dshpostapi.ui.common.BreathingAlpha
 import cd.ptrel.dshpostapi.ui.theme.LocalChatColors
@@ -259,15 +260,13 @@ fun MessageList(
         if (busy) {
             item(key = "__diving__") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    WhaleSpinner(
-                        size = 18.dp,
-                        swishing = true,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp))
+                    // v0.15.6：官方用的是**鲸鱼尾巴**（16x16 描边路径）+ deep-diving 蓝。
+                    // 早先用的是整条鲸鱼 logo + 次要灰，与官方差距明显（用户截图指出）。
+                    WhaleTail(size = 16.dp, swishing = true)
+                    androidx.compose.foundation.layout.Spacer(Modifier.size(6.dp))
                     DeepDivingLabel(
                         startedAt = busyStartedAt,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = deepDivingColor(),
                     )
                 }
             }

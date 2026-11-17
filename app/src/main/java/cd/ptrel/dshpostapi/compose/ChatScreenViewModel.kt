@@ -151,14 +151,21 @@ class ChatScreenViewModel(
     private fun startWatching() {
         watchJob?.cancel()
         val sid = _state.value.sessionId ?: return
-        if (_state.value.busy) return
+        // v0.15.5：**不要**因为 busy 就不连。
+        //
+        // 早先这里有一句 `if (busy) return` —— 它挡的恰恰是最常见的情况：
+        // 用户从会话列表点进一个**正在运行**的会话时，busy 一开始是 false 能连上，
+        // 收到 TurnStart 后 busy 变 true，此后任何重连都会被它挡住，
+        // 表现为「只加载了历史，之后不再接收流式内容」。
+        //
+        // 「本端发送时混进外部帧」该由帧处理判断，不该靠「不建立连接」来回避。
         watchJob = viewModelScope.launch {
             var attempt = 0
             while (true) {
                 val current = _state.value.sessionId ?: break
                 // 会话换了 / 本端开始发消息 → 退出观察
                 if (current != sid) break
-                if (_state.value.busy) { kotlinx.coroutines.delay(1_000); continue }
+                // v0.15.5：同样去掉 busy 空转 —— 外部轮跑着的时候更要连着。
                 try {
                     streamClient.watch(api.watchRequest(current)).collect { frame ->
                         when (frame) {
@@ -168,8 +175,13 @@ class ChatScreenViewModel(
                                 reload()
                             }
                             is WatchFrame.Text -> {
-                                // 外部在流式输出：追加到「外部消息」占位。
-                                appendExternal(frame.text)
+                                // v0.15.5：本端正在发送时，这条 Text 是本端自己那轮的回声 ——
+                                // 已经由 /chat/stream 追加进正文了，这里再加一遍会重复。
+                                //
+                                // 早先靠「busy 时不建立 watch 连接」回避这个问题，
+                                // 代价是外部轮永远连不上（见 startWatching 注释）。
+                                // 现在改成「连着但丢帧」——精确得多。
+                                if (!_state.value.busy) appendExternal(frame.text)
                             }
                             // v0.15.2：把**外部**轮的起止也映射到 busy ——
                             // 网页端在跑时 App 也该显示「深度求索中」，否则两端行为一致不了。
