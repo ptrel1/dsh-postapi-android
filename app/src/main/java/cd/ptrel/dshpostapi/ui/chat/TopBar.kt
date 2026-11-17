@@ -40,7 +40,11 @@ fun ChatTopBar(
     GlassSurface(
         modifier = modifier.fillMaxWidth(),
         cornerRadius = 0.dp,
-        tintAlpha = 0.62f,
+        // v0.17.2：0.62 → 0.80。62% 在照片上压不住 —— 用户截图里顶栏标题与
+        // 书架、显示器混在一起，读起来吃力。0.80 是实测能压住复杂照片的起点。
+        tintAlpha = 0.80f,
+        // 贴边的顶栏紧挨状态栏，顶部内高光会与状态栏区域糊成一片，关掉。
+        topHighlight = false,
     ) {
     Row(
         modifier = Modifier

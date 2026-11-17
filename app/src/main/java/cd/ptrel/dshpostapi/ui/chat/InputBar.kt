@@ -190,9 +190,12 @@ fun InputBar(
     val glassTint = if (glassQuality == cd.ptrel.dshpostapi.ui.common.GlassQuality.OFF) {
         colors.card
     } else if (isDark) {
-        colors.card.copy(alpha = 0.72f)
+        // v0.17.2：0.72 → 0.86。输入框里是**用户要读要写**的内容，
+        // 半透明过强时文字压在照片上很难辨认（顶栏已因此被反馈过）。
+        // 玻璃感靠边缘高光体现，不靠「能看见多少背景」。
+        colors.card.copy(alpha = 0.86f)
     } else {
-        colors.card.copy(alpha = 0.78f)
+        colors.card.copy(alpha = 0.90f)
     }
     val shape = ContainerShape
     val focusRequester = remember { FocusRequester() }
