@@ -16,6 +16,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
@@ -40,9 +41,9 @@ fun ChatTopBar(
     GlassSurface(
         modifier = modifier.fillMaxWidth(),
         cornerRadius = 0.dp,
-        // v0.17.2：0.62 → 0.80。62% 在照片上压不住 —— 用户截图里顶栏标题与
-        // 书架、显示器混在一起，读起来吃力。0.80 是实测能压住复杂照片的起点。
-        tintAlpha = 0.80f,
+        // v0.17.3：0.80 → 0.68。0.80 压得住字但玻璃感全无（看起来就是一块灰板）。
+        // 0.68 配合标题文字的阴影，兼顾两者。
+        tintAlpha = 0.68f,
         // 贴边的顶栏紧挨状态栏，顶部内高光会与状态栏区域糊成一片，关掉。
         topHighlight = false,
     ) {
@@ -61,7 +62,17 @@ fun ChatTopBar(
             color = MaterialTheme.colorScheme.onBackground,
             modifier = Modifier
                 .weight(1f)
-                .padding(start = 8.dp),
+                .padding(start = 8.dp)
+                // v0.17.3：文字阴影。
+                //
+                // 玻璃调到 0.68 之后，照片的亮部会透上来，深色标题在浅色区域
+                // 仍然发虚。阴影是**局部的**可读性保障 —— 比把整块玻璃做厚好得多，
+                // 后者会让玻璃彻底看不出透。
+                .graphicsLayer {
+                    shadowElevation = 1.dp.toPx()
+                    ambientShadowColor = androidx.compose.ui.graphics.Color.Black
+                    spotShadowColor = androidx.compose.ui.graphics.Color.Black
+                },
             maxLines = 1,
         )
         // 与长按菜单的「从这里新建对话」同一个图标 —— 同一个动作，同一个符号。

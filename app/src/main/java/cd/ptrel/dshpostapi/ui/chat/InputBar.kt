@@ -190,12 +190,16 @@ fun InputBar(
     val glassTint = if (glassQuality == cd.ptrel.dshpostapi.ui.common.GlassQuality.OFF) {
         colors.card
     } else if (isDark) {
-        // v0.17.2：0.72 → 0.86。输入框里是**用户要读要写**的内容，
-        // 半透明过强时文字压在照片上很难辨认（顶栏已因此被反馈过）。
-        // 玻璃感靠边缘高光体现，不靠「能看见多少背景」。
-        colors.card.copy(alpha = 0.86f)
+        // v0.17.3：0.86 → 0.62。
+        //
+        // 0.86 等于做成了实心块 —— 用户反馈「底部框背景不是透明的，
+        // 上滑文字应该能放在背景上」。玻璃要能透出背景才有意义。
+        //
+        // 可读性改由**输入框自身的不透明底**保证（见下方 textField 的底色），
+        // 而不是靠把整块玻璃做厚 —— 那会让它变成一堵墙。
+        colors.card.copy(alpha = 0.62f)
     } else {
-        colors.card.copy(alpha = 0.90f)
+        colors.card.copy(alpha = 0.70f)
     }
     val shape = ContainerShape
     val focusRequester = remember { FocusRequester() }

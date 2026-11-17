@@ -280,7 +280,14 @@ fun ChatScreen(
                 onDismiss = { onAnswerQuestion(pending.callId, emptyList()) },
             )
         }
-        Column(
+        // v0.17.3：Column → Box。
+        //
+        // 原来 Column 里 MessageList 用 weight(1f)，消息区到输入栏上沿就截止 ——
+        // 文字永远不会出现在输入栏「下方」，用户看到的是一堵墙把内容切断。
+        //
+        // 改成 Box 叠放：列表铺满整页（含输入栏区域），输入栏浮在底部。
+        // 于是上滑时文字会从输入栏底下经过 —— 那才是「玻璃浮在内容之上」的样子。
+        androidx.compose.foundation.layout.Box(
             modifier = modifier
                 .fillMaxSize()
                 .padding(padding)
@@ -319,8 +326,7 @@ fun ChatScreen(
             MessageList(
                 messages = uiMessages,
                 modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
+                    .fillMaxSize(),
                 listState = listState,
                 // v0.15.3：运行状态作为消息流最后一条（接近法则：紧邻它所描述的那一轮）。
                 busy = state.busy,
@@ -345,7 +351,17 @@ fun ChatScreen(
                     }
                 },
                 // 底部留给浮层输入栏，否则最后一条永远被压在下面滚不出来。
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                // v0.17.3：底部 padding 要留出**输入栏高度**。
+                //
+                // 列表现在铺满整页（含输入栏区域），如果只留 12dp，
+                // 滚到底时最后一行会被输入栏压在下面 —— 用户看不到最新内容。
+                // 220dp 是输入栏在最坏情况（多行文字 + 图片缩略图 + 一排按钮）下的高度上限。
+                contentPadding = PaddingValues(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = 12.dp,
+                    bottom = 220.dp,
+                ),
                 // 其余回调全部用默认值：本项目暂不支持重新生成/编辑/分叉/朗读。
                 // 依赖默认值而不是传空 lambda —— 语义上「这个功能不存在」，
                 // 而不是「存在但点了没反应」。
@@ -361,6 +377,7 @@ fun ChatScreen(
             }
 
             InputBar(
+                modifier = androidx.compose.ui.Modifier.align(androidx.compose.ui.Alignment.BottomCenter),
                 text = input,
                 onTextChange = { input = it },
                 // DSH 侧没有「思考档位」开关（模型由服务端决定）。
