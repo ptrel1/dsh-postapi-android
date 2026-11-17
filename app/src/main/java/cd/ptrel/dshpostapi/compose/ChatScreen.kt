@@ -327,11 +327,13 @@ fun ChatScreen(
                 // 加在 Column 而不是 InputBar：配合 weight(1f) 的 MessageList，
                 // 输入栏自然被抬到安全区之上，列表高度也同步缩短 —— 一处生效两处都对。
                 // 只加在 InputBar 上则列表仍会延伸到手势条下面（滚到底被遮）。
-                .navigationBarsPadding()
-                // ── 底部留白 = max(手势条, 左右留白)，两者**取大不叠加**（v0.13.3）──
+                // ⚠️ v0.18.2：这里原本**连着两行** .navigationBarsPadding()，
+                // 底部又被下面那个 padding(bottom = ...) 再加一次 ——
+                // 三层 inset 叠加，输入栏被抬到离屏幕底边很远的位置，
+                // 下方留出一条谁也说不清是什么的空白（用户截图反馈）。
                 //
-                .navigationBarsPadding()
-                // ── 底部留白 = max(手势条, 左右留白)，两者**取大不叠加**（v0.13.3）──
+                // 只保留**下面那个 padding**：它已经取了「手势条高度与 16dp 的较大值」，
+                // 语义更精确（贴齐手势区上沿，且三键机上也与左右留白一致）。
                 //
                 // 早先是 navigationBarsPadding() 后面再加 padding(bottom = 16.dp)，两者相加 ——
                 // 在 gesture inset ≈ 24dp 的机型上变成 40dp，而左右是 16dp，

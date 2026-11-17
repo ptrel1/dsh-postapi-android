@@ -27,6 +27,24 @@
       底部导航栏区域应当是 App 主题色，而不是透出网页内容。
       （API 35+ 该项被忽略，由 padding 方案接管；这里保证 API 24~34 一致。）
     -->
+    <!--
+      v0.18.2：Compose 页面专用主题。
+
+      ## 为什么单独一个
+
+      Compose 的 Activity 用 setContent 画整棵树，系统栏区域由 Compose 自己
+      决定画什么（AppBackground 铺满全屏）。但**窗口**的底色仍然是
+      android:windowBackground —— 它若是不透明色，就会出现「内容画了、
+      系统栏那一条还是窗口底色」的观感：用户看到底部一条黑色留边。
+
+      把 windowBackground 设为透明后，系统栏区域直接透出 Compose 的画面。
+      ⚠️ 注意这不等于「整个窗口透明」：Compose 自己会画不透明内容，
+      只是不再有窗口底色垫在下面。
+    -->
+    <style name="Theme.DshPostapi.Compose" parent="Theme.DshPostapi">
+        <item name="android:windowBackground">@android:color/transparent</item>
+    </style>
+
     <style name="Theme.DshPostapi.Web" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="android:windowBackground">@color/surface</item>
         <item name="android:statusBarColor">@color/surface</item>
