@@ -385,21 +385,32 @@ private fun WorkspaceHeader(
             .fillMaxWidth()
             // 整块可点：只让箭头可点的话，手指要精确落在 16dp 的图标上。
             .clickable(onClick = onToggle)
-            .padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 4.dp),
+            // v0.16.1：行高统一 56dp（原来是 top=12/bottom=4 的松紧不一，
+            // 短标题看起来更空）。56dp 也正好是 Android 推荐的最小可点区域上限，
+            // 手指不用瞄准。
+            .height(56.dp)
+            .padding(start = 16.dp, end = 16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            // v0.16.0：标题改**黑体正色**，不再是蓝色。
+            //
+            // 原来用 primary 蓝色：一排工作区全蓝，视觉上「什么都像链接」=「什么都不是按钮」。
+            // 蓝色该留给**真正的动作**（新建会话那个胶囊），而不是一份清单的每一项。
             Text(
                 text = group.name.ifBlank { Res.get(R.string.compat_workspace_other) },
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false),
+                modifier = Modifier.weight(1f),
             )
-            Spacer(Modifier.width(8.dp))
+            // 数量右对齐、紧贴箭头左侧 —— 像 iOS 设置那样给一个稳定的第二列，
+            // 眼睛可以沿这条竖线快速扫过。原来是紧跟在标题后面的小灰字，
+            // 长短不一的标题让这列参差不齐。
+            Spacer(Modifier.width(12.dp))
             Text(
                 text = group.sessions.size.toString(),
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.bodyMedium,
                 color = colors.placeholder,
             )
             // 展开指示：旋转 90° 的 V 形。用旋转而不是换图标 ——
@@ -409,21 +420,18 @@ private fun WorkspaceHeader(
                 contentDescription = null,
                 tint = colors.placeholder,
                 modifier = Modifier
+                    .padding(start = 4.dp)
                     .size(16.dp)
                     .graphicsLayer { rotationZ = if (expanded) 90f else 0f },
             )
         }
-        // 完整路径只在有值且有父目录时显示 —— 顶层目录（如 /main）本身已经
-        // 和组名一样了，再显示一遍是噪音。
-        if (group.path.isNotBlank() && group.path.trimEnd('/').contains('/')) {
-            Text(
-                text = group.path,
-                style = MaterialTheme.typography.labelSmall,
-                color = colors.placeholder,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
+        // v0.16.0：**删掉路径**。
+        //
+        // `/main/app/github/dsh1-plugins` 对用户的价值接近 0 —— 他认识的是
+        // `dsh1-plugins`，不认识那串绝对路径。而它占了这一行一半的视觉重量，
+        // 让清单看起来又长又灰（用户反馈「首页不太好看」）。
+        //
+        // 路径信息没丢：新建会话选工作区时仍会显示完整路径（那里确实需要区分）。
     }
 }
 

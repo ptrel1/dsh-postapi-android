@@ -188,14 +188,33 @@ fun ChatScreen(
     // 向后滚动超过阈值）就关掉 follow；滑回底部就重新打开。
     var following by remember(state.sessionId) { mutableStateOf(true) }
     LaunchedEffect(listState) {
-        snapshotFlow { listState.isScrollInProgress to listState.canScrollForward }
-            .collect { (scrolling, canForward) ->
-                // 只在**用户手指参与**时改意图；程序滚动（我们自己调 followBottom）不算。
-                if (scrolling) {
-                    // 手指在动：他往上拖就停止跟随
-                    following = !canForward
-                }
+        // ⚠️ v0.15.10：判据从 `!canScrollForward` 改成「位置是否在**回退**」。
+        //
+        // 旧判据的问题：`canScrollForward` 是**布局状态**，内容一增长它就变 true。
+        // 流式过程中用户哪怕只轻碰一下屏幕（产生一次 isScrollInProgress），
+        // 那一帧 canScrollForward 已经是 true → following 置 false → 跟随中断。
+        // 实测表现是「滚一两下就停」，与用户直觉不符：他根本没往上拉。
+        //
+        // 新判据：比较 firstVisibleItemIndex + scrollOffset 合成的偏移量。
+        //   · 值变小（向顶部方向走）→ 用户在看历史 → 停止跟随
+        //   · 回到最底部 → 恢复跟随（见下面第二个 effect）
+        var lastPos = 0f
+        snapshotFlow {
+            listState.firstVisibleItemIndex.toFloat() * 100_000f +
+                listState.firstVisibleItemScrollOffset.toFloat()
+        }.collect { pos ->
+            if (listState.isScrollInProgress) {
+                // 只有**手指参与**时才改意图（程序调用 followBottom 不经过这里）
+                if (pos < lastPos - 8f) following = false
             }
+            lastPos = pos
+        }
+    }
+    // 滑回底部就恢复跟随 —— 与上面分开：
+    // 「到底」是布局事实，不需要手指参与。
+    LaunchedEffect(listState) {
+        snapshotFlow { !listState.canScrollForward && !listState.isScrollInProgress }
+            .collect { atBottom -> if (atBottom) following = true }
     }
 
     LaunchedEffect(lastMessageLen) {

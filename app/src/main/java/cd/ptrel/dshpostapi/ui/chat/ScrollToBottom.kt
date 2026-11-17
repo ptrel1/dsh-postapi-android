@@ -107,10 +107,26 @@ private const val FollowFraction = 0.7f
  * 那次直接跳，没有台阶可摊。
  */
 suspend fun LazyListState.followBottom() {
+    // ⚠️ v0.16.2：改回**一次到位**。
+    //
+    // 早先这里是 `scrollBy(remaining * 0.7)`，注释里自认「代价是最新一行被裁掉不到一行」，
+    // 说是拿「最后一行完整可见」换「运动连续」。**这个取舍是错的**：
+    //
+    // 它假设「滚一次之后内容不再长」，但流式每 50ms 就长一批 ——
+    // 于是永远差 30% 追不上：长 10px 滚 7px，剩 3px；再长 10px 滚 9px，剩 4px……
+    // 每一帧都在「几乎贴上又差一点」之间来回，坐实了「一闪一闪」（用户反馈）。
+    //
+    // 关键事实：列表是**顶部为原点**（reverseLayout = false），
+    // 流式消息在自己的**底边**长高，屏幕上方已显示的内容纹丝不动。
+    // 所以「直接跳到底」不会产生任何视觉跳变 —— 该有的平滑它本来就有。
+    //
+    // 0.7 那个做法真正解决的问题（每批 token 之间跳台阶）不存在：
+    // 内容本来就是**离散到批**的，一次滚到底和一次滚 70% 的视觉差异，
+    // 远小于「永远差一点」的持续抖动。
     val remaining = distanceToBottom()
     when {
         !remaining.isFinite() -> scrollToBottom()
-        remaining > 0f -> scrollBy(remaining * FollowFraction)
+        remaining > 0f -> scrollBy(remaining)
         /*
          * 兜底。走到这里意味着 `canScrollForward` 为真（调用方保证）而距离算出来是 0 ——
          * 只可能是内边距那一段的边界算不准。此时退回已知正确的"直接跳"：
