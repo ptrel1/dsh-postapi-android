@@ -110,7 +110,10 @@ class ReplyAccumulator {
 
             // OpenAI 通道的增量事件不走这个累加器；流量到了这里说明通道配错，忽略即可
             is StreamEvent.Content, is StreamEvent.Reasoning, is StreamEvent.Usage,
-            StreamEvent.Done, is StreamEvent.Error -> Unit
+            StreamEvent.Done, is StreamEvent.Error,
+            // v0.14.0：执行过程由 ChatScreenViewModel 单独处理，
+            // 这个累积器只管正文/思考块的拼接。
+            is StreamEvent.ToolCall, is StreamEvent.ToolResult, is StreamEvent.Step -> Unit
         }
     }
 

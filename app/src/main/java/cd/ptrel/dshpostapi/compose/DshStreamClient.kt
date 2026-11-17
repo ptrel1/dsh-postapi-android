@@ -227,11 +227,23 @@ class DshStreamClient(
             "start" -> o.optString("sessionId").takeIf { it.isNotEmpty() }?.let { StreamEvent.Title(it) }
             "text" -> o.optString("text").takeIf { it.isNotEmpty() }?.let { StreamEvent.Content(it) }
             "reasoning" -> o.optString("text").takeIf { it.isNotEmpty() }?.let { StreamEvent.Reasoning(it) }
-            // 工具帧：SimpleChat 的 StreamEvent 没有通用 tool 类型
-            // （它的工具信息走 Anthropic 块级事件）。DSH 的 tool 帧暂时丢弃 ——
-            // 用户看不到「正在使用 X」，但不影响对话本身。
-            // 要显示工具过程，得在 StreamEvent 里加一个 Tool 类型并让 UI 处理。
-            "tool" -> null
+            // v0.14.0：执行过程帧（服务端从 tool/call、tool/result、step/* 转发）。
+            // 早先这里把 "tool" 直接返回 null —— 注释还写着「要显示工具过程，
+            // 得在 StreamEvent 里加一个 Tool 类型并让 UI 处理」。现在补上了。
+            "tool-call" -> o.optString("name").takeIf { it.isNotEmpty() }?.let {
+                StreamEvent.ToolCall(
+                    callId = o.optString("callId"),
+                    name = it,
+                    args = o.optString("args"),
+                )
+            }
+            "tool-result" -> StreamEvent.ToolResult(
+                callId = o.optString("callId"),
+                ok = o.optBoolean("ok", true),
+                text = o.optString("text"),
+            )
+            "step" -> StreamEvent.Step(starting = o.optString("kind") == "start")
+            "tool" -> null   // 旧帧名，服务端已不再发送；保留以免老版本兼容问题
             "done" -> {
                 val cancelled = o.optString("reason") == "cancelled"
                 if (cancelled) StreamEvent.Stopped("cancelled") else StreamEvent.Done

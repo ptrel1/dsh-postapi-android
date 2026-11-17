@@ -7,6 +7,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -261,26 +265,23 @@ fun ChatScreen(
                 // 输入栏自然被抬到安全区之上，列表高度也同步缩短 —— 一处生效两处都对。
                 // 只加在 InputBar 上则列表仍会延伸到手势条下面（滚到底被遮）。
                 .navigationBarsPadding()
-                // ⚠️ 再补一段固定底部间距（v0.11.1）。
+                // ── 底部留白 = max(手势条, 左右留白)，两者**取大不叠加**（v0.13.3）──
                 //
-                // 为什么不能只靠 insets：insets 是**设备相关**的 ——
-                //   · 手机手势条 ≈ 48~72dp，`navigationBarsPadding` 已经留够；
-                //   · 平板/模拟器三键或全面屏手势关闭时 insets = 0，
-                //     输入栏就直接压在屏幕物理底边上，视觉上「贴着底」。
-                // 同一份代码在两种设备上得到两种观感，这是 insets 的固有属性，
-                // 不是 bug。补一个**与设备无关**的最小底部留白即可对齐观感。
+                .navigationBarsPadding()
+                // ── 底部留白 = max(手势条, 左右留白)，两者**取大不叠加**（v0.13.3）──
                 //
-                // 底部留白 = 左右留白（v0.11.1 用户要求「三边视觉等距」）。
+                // 早先是 navigationBarsPadding() 后面再加 padding(bottom = 16.dp)，两者相加 ——
+                // 在 gesture inset ≈ 24dp 的机型上变成 40dp，而左右是 16dp，
+                // 视觉上底部明显偏空（用户反馈「底部距离在这个手机上不一样」）。
                 //
-                // 关键在于**自动跟随**而不是硬编码：
-                //   左右留白由 [ChatSidePadding] 决定，这里用同一个值，
-                //   两处不会失同步（早先两处各写 16/12，就出现了「底下偏挤」）。
-                //
-                // 为什么不直接用 navigationBarsPadding 的下沿：
-                //   那是**设备相关**的（手机手势条 48~72dp、平板三键 0），
-                //   insets 为 0 时卡片会直接压到屏幕物理底边。
-                //   左右留白是**设计常量**，用它与底部对齐才在任何设备上观感一致。
-                .padding(bottom = ChatSidePadding),
+                // 改成「取大」：手势条比 16dp 高就用手势条高度（恰好贴齐手势区上沿），
+                // 手势条为 0（三键关闭 / 平板）就用 16dp（与左右一致）。
+                // 两种设备上「输入框到屏幕底边的距离」都等于左右留白，观感统一。
+                .padding(
+                    bottom = WindowInsets.navigationBars.asPaddingValues()
+                        .calculateBottomPadding()
+                        .coerceAtLeast(ChatSidePadding),
+                ),
         ) {
             MessageList(
                 messages = uiMessages,
@@ -288,6 +289,9 @@ fun ChatScreen(
                     .weight(1f)
                     .fillMaxWidth(),
                 listState = listState,
+                // v0.15.3：运行状态作为消息流最后一条（接近法则：紧邻它所描述的那一轮）。
+                busy = state.busy,
+                busyStartedAt = state.busyStartedAt,
                 // v0.12.1：只保留「复制」。重新生成/编辑/删除依赖服务端能力，
                 // 而 DSH 的会话日志是追加式的，改删在语义上不成立。
                 showMutatingActions = false,
@@ -425,6 +429,8 @@ private fun ChatViewModelMsg.toChatUi(): UiMessage {
         parentId = "",
         variantIndex = 0,
         variantCount = 1,
+        // v0.14.0：执行过程透传给渲染层。
+        execSteps = src.steps,
     )
 }
 

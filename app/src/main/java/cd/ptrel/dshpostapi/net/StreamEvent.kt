@@ -55,6 +55,34 @@ sealed interface StreamEvent {
     /** 服务端生成的会话标题（仅首轮且请求了 `title.enabled` 时下发）。 */
     data class Title(val text: String) : StreamEvent
 
+    // ── DSH 执行过程（v0.14.0）─────────────────────────────────────
+    //
+    // 用户要求「dsh 执行过程也应该在 app 中渲染」：模型调了哪些工具、
+    // 每步结果如何，应当看得见 —— 否则长任务期间界面一片空白，
+    // 用户不知道它是在思考、在跑命令、还是卡住了。
+    //
+    // 服务端从 sc.follow() 的 tool/call、tool/result、step/start|end 事件转发。
+    // 这三个是**展示用**的：不影响正文拼接，也不参与状态机。
+    data class ToolCall(
+        /** 宿主给的调用 id，用于把 result 配回对应的 call。 */
+        val callId: String,
+        /** 工具名，如 `terminal_send`、`read_file`。 */
+        val name: String,
+        /** 原始参数 JSON（已截断）。UI 只展示摘要，不解析。 */
+        val args: String,
+    ) : StreamEvent
+
+    data class ToolResult(
+        val callId: String,
+        /** 成功与否（宿主判据：有 error 或 message.isError）。 */
+        val ok: Boolean,
+        /** 输出文本（已截断到 2000 字符）。 */
+        val text: String,
+    ) : StreamEvent
+
+    /** 一步开始/结束。用来在界面上分隔「第几轮工具调用」。 */
+    data class Step(val starting: Boolean) : StreamEvent
+
     /** 结束原因：`end_turn` / `max_tokens` / `tool_use` / `refusal`。 */
     data class Stopped(val reason: String?) : StreamEvent
 }

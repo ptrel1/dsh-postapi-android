@@ -145,7 +145,7 @@ class CompatApi(
                 name = name,
             )
         }
-}
+    }
 
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -212,10 +212,18 @@ class CompatApi(
      */
     data class HistoryPage(
         val messages: List<Message>,
-        /** turn -> 该轮产出的交付物。key 是 Number.toString()。 */
+        /** turn -> 该轮产出的交付物。key 是 turn 的十进制字符串（JSON 对象的键只能是字符串）。 */
         val deliverablesByTurn: Map<Int, List<Deliverable>>,
         /** 服务端是否还有更早的消息（v0.8.0 上翻加载用）。 */
         val hasMore: Boolean = false,
+        /**
+         * 当前会话的模式（插件 v1.13.5 起下发），如 `standard` / `ptc`。
+         *
+         * 来源是宿主的 agentPreset 会话投影 —— 用户切过模式后 header 不变，
+         * 只有投影会跟着 agent-preset/selected 事件走。
+         * null = 读不到（不显示，不猜）。
+         */
+        val agentPreset: String? = null,
     )
 
     /** 交付物：挂在某条助手消息下。 */
@@ -240,7 +248,23 @@ class CompatApi(
          * 用户消息通常没有 turn（宿主只在 assistant/message 上带）。
          */
         val turn: Int = -1,
-    )
+        /**
+         * 执行过程（插件 v1.14.0 起下发）：这条助手消息所属那一轮调了哪些工具。
+         *
+         * 与实时流式的 [StreamEvent.ToolCall]/[StreamEvent.ToolResult] 是同一份数据，
+         * 只是一个来自历史、一个来自 SSE —— 界面渲染时不该区分来源。
+         */
+        val execSteps: List<ExecStep> = emptyList(),
+    ) {
+        /** 一次工具调用 + 结果（[result] 为 null 表示当时没拿到结果）。 */
+        data class ExecStep(
+            val callId: String,
+            val name: String,
+            val args: String,
+            val result: ExecResult?,
+        )
+        data class ExecResult(val ok: Boolean, val text: String)
+    }
 
     /** 统一的结果类型：成功带值、失败带可展示的原因。 */
     sealed class Result<out T> {
@@ -321,6 +345,25 @@ class CompatApi(
                         )
                     }
                 }
+                // v0.14.0：执行过程（插件 v1.14.0 起 history 带 execSteps）。
+                val stepsArr = o.optJSONArray("execSteps")
+                val steps = ArrayList<Message.ExecStep>()
+                if (stepsArr != null) {
+                    for (k in 0 until stepsArr.length()) {
+                        val st = stepsArr.optJSONObject(k) ?: continue
+                        val resObj = st.optJSONObject("result")
+                        steps.add(
+                            Message.ExecStep(
+                                callId = st.optString("callId"),
+                                name = st.optString("name"),
+                                args = st.optString("args"),
+                                result = resObj?.let {
+                                    Message.ExecResult(it.optBoolean("ok", true), it.optString("text"))
+                                },
+                            ),
+                        )
+                    }
+                }
                 out.add(
                     Message(
                         seq = o.optInt("seq", 0),
@@ -329,6 +372,7 @@ class CompatApi(
                         time = o.optLong("time", 0L),
                         deliverables = delivs,
                         turn = o.optInt("turn", -1),
+                        execSteps = steps,
                     ),
                 )
             }
@@ -358,7 +402,12 @@ class CompatApi(
                     byTurn[turn] = dl
                 }
             }
-            HistoryPage(out, byTurn, body.optBoolean("hasMore", false))
+            HistoryPage(
+                messages = out,
+                deliverablesByTurn = byTurn,
+                hasMore = body.optBoolean("hasMore", false),
+                agentPreset = body.optString("agentPreset").takeIf { it.isNotEmpty() && it != "null" },
+            )
         }
     }
 

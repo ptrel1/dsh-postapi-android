@@ -5,6 +5,9 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -65,6 +68,10 @@ import cd.ptrel.dshpostapi.ui.common.rememberPressPosition
 import cd.ptrel.dshpostapi.ui.markdown.MarkdownText
 import cd.ptrel.dshpostapi.ui.markdown.MarkdownWithMath
 import cd.ptrel.dshpostapi.ui.theme.ChatColors
+import cd.ptrel.dshpostapi.ui.common.DeepDivingLabel
+import cd.ptrel.dshpostapi.ui.common.WhaleSpinner
+import cd.ptrel.dshpostapi.compose.NetMessage
+import cd.ptrel.dshpostapi.ui.common.BreathingAlpha
 import cd.ptrel.dshpostapi.ui.theme.LocalChatColors
 import cd.ptrel.dshpostapi.ui.common.PillShape
 import androidx.compose.animation.animateContentSize
@@ -95,6 +102,10 @@ fun MessageList(
      * 不给这块留白的话最后一条消息会永远被压在输入栏底下，滚不出来。
      */
     contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+    /** 是否正在进行一轮（v0.15.3）：true 时列表末尾显示「深度求索中」。 */
+    busy: Boolean = false,
+    /** 这一轮开始的时刻（SystemClock.elapsedRealtime）。0 = 没在跑。 */
+    busyStartedAt: Long = 0L,
     onCopy: (UiMessage) -> Unit = {},
     onRegenerate: (UiMessage) -> Unit = {},
     /** 继续生成：接着这条回复往下写（只有扩展通道能续，见 `ContinuePolicy`）。 */
@@ -225,6 +236,41 @@ fun MessageList(
                 onOpenImage = { onOpenImage(message, it) },
                 onRetry = { onRetry(message) },
             )
+        }
+
+        /*
+         * 运行状态作为**消息流的最后一条**（v0.15.3）。
+         *
+         * ## 为什么放这里而不是顶栏/输入栏
+         *
+         * 「这一轮在跑」本质上是**消息流里的一条状态**，不是外围 UI 的状态：
+         *   · 接近法则：它必须紧邻它所描述的那一轮
+         *   · 阅读连续性：用户正在读消息，往下扫就自然看到
+         *   · 不占固定空间：随流滚动，不挤压任何区域
+         *
+         * 顶栏/输入栏那种做法是「悬浮的状态」，与它所描述的内容隔了一层 ——
+         * 用户看到的是一条孤立的信息，而不是「这一轮还没完」。
+         *
+         * ## 为什么用 item {} 而不是塞进最后一条消息
+         *
+         * 塞进消息会让它跟消息一起被复制/被缓存，语义也错（它不是消息）。
+         * 独立 item 有独立的 key，滚动位置与增量更新都更干净。
+         */
+        if (busy) {
+            item(key = "__diving__") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    WhaleSpinner(
+                        size = 18.dp,
+                        swishing = true,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp))
+                    DeepDivingLabel(
+                        startedAt = busyStartedAt,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
     }
 }
@@ -705,6 +751,12 @@ fun AssistantBlock(
             )
             .padding(2.dp),
     ) {
+        // v0.14.0：执行过程（工具调用 + 结果）排在正文之前 ——
+        // 用户先看到「它在干什么」，再看「它说了什么」，符合时间顺序。
+        if (message.execSteps.isNotEmpty()) {
+            ExecSteps(message.execSteps)
+            Spacer(Modifier.size(MessageGap))
+        }
         if (timeline != null) {
             if (timeline.hasSteps) {
                 TimelinePanel(
@@ -1005,5 +1057,98 @@ fun VariantSwitcher(
                 colors.placeholder
             },
         )
+    }
+}
+/**
+ * 执行过程条目（v0.14.0）：模型调用了什么工具、结果如何。
+ *
+ * ## 为什么单独渲染而不是塞进正文
+ *
+ * 正文是**对话内容**，过程是**元信息**。混在一起会让复制/导出带上噪音，
+ * 也会让正文的增量拼接逻辑变复杂（正文是逐 token 追加，工具是成对出现）。
+ *
+ * ## 视觉
+ *
+ * 折线 + 等宽字体，比正文弱一级（小一号、次要色）：
+ * 用户看的是回答，过程只在「它在干什么、卡在哪」时才需要细看。
+ * 结果默认只显示前几行，长的折起来 —— 一次 grep 可能几百行。
+ */
+@Composable
+private fun ExecSteps(steps: List<NetMessage.ExecStep>) {
+    val colors = LocalChatColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        steps.forEach { step ->
+            val done = step.result != null
+            val ok = step.result?.ok ?: true
+            Row(verticalAlignment = Alignment.Top) {
+                // 状态点：进行中空心、成功实心绿、失败实心红
+                Box(
+                    modifier = Modifier
+                        .padding(top = 5.dp, end = 6.dp)
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(
+                            when {
+                                !done -> colors.placeholder
+                                ok -> Color(0xFF22A06B)
+                                else -> Color(0xFFD14343)
+                            },
+                        ),
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = step.name,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontFamily = FontFamily.Monospace,
+                            color = colors.placeholder,
+                        )
+                        if (!done) {
+                            // v0.15.0：用官方的呼吸闪烁（1s, opacity 1→0.35→1）
+                            // 而不是一句静止的「进行中…」—— 静止文字看起来像卡住了。
+                            val alpha = BreathingAlpha(busy = true)
+                            Text(
+                                text = "  进行中…",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.placeholder,
+                                modifier = Modifier.alpha(alpha),
+                            )
+                        }
+                    }
+                    // 参数摘要：只取第一行，避免长 JSON 撑开界面
+                    val argLine = step.args.lineSequence().firstOrNull()?.take(120).orEmpty()
+                    if (argLine.isNotBlank() && argLine != "{}") {
+                        Text(
+                            text = argLine,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = colors.placeholder,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    step.result?.let { r ->
+                        val lines = r.text.trim().lineSequence().filter { it.isNotBlank() }.toList()
+                        if (lines.isNotEmpty()) {
+                            // 只显示前 3 行：完整结果对用户没意义，
+                            // 他要的是「这步干了什么、成没成」。
+                            Text(
+                                text = lines.take(3).joinToString("\n") +
+                                    if (lines.size > 3) "\n… 还有 " + (lines.size - 3) + " 行" else "",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = if (r.ok) colors.placeholder else Color(0xFFD14343),
+                                maxLines = 4,
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }

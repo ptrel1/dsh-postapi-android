@@ -189,6 +189,14 @@ data class UiMessage(
      */
     val model: String? = null,
     /** 父亲消息 id；空串表示这是当前分支的根（§17）。 */
+    /**
+     * 执行过程（v0.14.0）：模型调了哪些工具、结果如何。
+     *
+     * 空列表 = 没有工具调用（纯对话），界面不显示这一段。
+     * 类型复用 NetMessage.ExecStep：它就是渲染层要的全部字段，
+     * 再镜像一份 UiExecStep 只会多一层无意义的转换。
+     */
+    val execSteps: List<cd.ptrel.dshpostapi.compose.NetMessage.ExecStep> = emptyList(),
     val parentId: String = "",
     /** 同父兄弟间的版本号，0 起。 */
     val variantIndex: Int = 0,

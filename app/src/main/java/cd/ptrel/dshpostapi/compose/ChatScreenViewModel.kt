@@ -36,7 +36,25 @@ data class NetMessage(
     val status: Status = Status.Done,
     /** 正在用的工具名（有值且 status=Streaming 时显示「正在使用 X」）。 */
     val tool: String? = null,
+    /**
+     * 执行过程（v0.14.0）：模型调了哪些工具、每步结果如何。
+     *
+     * 与 [text] 分开存：正文是**对话内容**，过程是**元信息**。
+     * 混在一起会污染复制/导出，也会让正文的增量拼接逻辑变复杂。
+     */
+    val steps: List<ExecStep> = emptyList(),
 ) {
+    /** 一次工具调用 + 它的结果。结果未到时 [result] 为 null（显示为进行中）。 */
+    data class ExecStep(
+        val callId: String,
+        val name: String,
+        /** 原始参数（截断）。UI 只取摘要展示，不解析 JSON。 */
+        val args: String,
+        /** null = 还在跑；非 null = 已返回。 */
+        val result: Result? = null,
+    ) {
+        data class Result(val ok: Boolean, val text: String)
+    }
     enum class Role { User, Assistant }
     enum class Status { Streaming, Done, Stopped, Error }
 }
@@ -78,6 +96,13 @@ class ChatScreenViewModel(
     data class UiState(
         val messages: List<NetMessage> = emptyList(),
         val busy: Boolean = false,
+        /**
+         * 这一轮开始的时刻（SystemClock.elapsedRealtime，v0.15.0）。
+         *
+         * 用 elapsedRealtime 而不是 System.currentTimeMillis：后者会被用户改时间/
+         * NTP 校时影响，重则算出负数用时。0 = 没在跑。
+         */
+        val busyStartedAt: Long = 0L,
         val error: String? = null,
         val sessionId: String? = null,
         /**
@@ -146,6 +171,23 @@ class ChatScreenViewModel(
                                 // 外部在流式输出：追加到「外部消息」占位。
                                 appendExternal(frame.text)
                             }
+                            // v0.15.2：把**外部**轮的起止也映射到 busy ——
+                            // 网页端在跑时 App 也该显示「深度求索中」，否则两端行为一致不了。
+                            // 注意不置 busy=true 会覆盖本端发送：本端发送时 watch 是被暂停的
+                            //（startWatching 里 `if (busy) { delay; continue }`），所以不会打架。
+                            is WatchFrame.TurnStart -> {
+                                if (!_state.value.busy) {
+                                    _state.update {
+                                        it.copy(busy = true, busyStartedAt = android.os.SystemClock.elapsedRealtime())
+                                    }
+                                }
+                            }
+                            is WatchFrame.TurnEnd -> {
+                                // 只清掉「外部轮」的 busy：本端那条流的 busy 由 send() 自己收尾。
+                                if (_state.value.busy) {
+                                    _state.update { it.copy(busy = false, busyStartedAt = 0L) }
+                                }
+                            }
                             is WatchFrame.Done -> reload()
                             is WatchFrame.Questions -> {
                                 _state.update { it.copy(pendingQuestion = frame.pending) }
@@ -201,6 +243,7 @@ class ChatScreenViewModel(
             it.copy(
                 messages = it.messages + userMsg + placeholder,
                 busy = true,
+                busyStartedAt = android.os.SystemClock.elapsedRealtime(),
                 error = null,
             )
         }
@@ -228,17 +271,43 @@ class ChatScreenViewModel(
                     }
                     is StreamEvent.Content -> updateReply(replyId) { it.copy(text = it.text + event.text) }
                     is StreamEvent.Reasoning -> updateReply(replyId) { it.copy(reasoning = it.reasoning + event.text) }
+                    // v0.14.0：执行过程。工具调用先建一条「进行中」，
+                    // 结果到达时按 callId 配回去 —— 这样界面上能看到「正在跑」再变成完成态。
+                    is StreamEvent.ToolCall -> updateReply(replyId) { msg ->
+                        msg.copy(
+                            tool = event.name,
+                            steps = msg.steps + NetMessage.ExecStep(
+                                callId = event.callId,
+                                name = event.name,
+                                args = event.args,
+                            ),
+                        )
+                    }
+                    is StreamEvent.ToolResult -> updateReply(replyId) { msg ->
+                        msg.copy(
+                            tool = null,
+                            steps = msg.steps.map { st ->
+                                if (st.callId == event.callId) {
+                                    st.copy(result = NetMessage.ExecStep.Result(event.ok, event.text))
+                                } else {
+                                    st
+                                }
+                            },
+                        )
+                    }
+                    // step 帧只用来说明「换了一步」，界面不单独展示（工具条目已足够）。
+                    is StreamEvent.Step -> Unit
                     is StreamEvent.Done -> {
                         updateReply(replyId) { it.copy(status = NetMessage.Status.Done, tool = null) }
-                        _state.update { it.copy(busy = false) }
+                        _state.update { it.copy(busy = false, busyStartedAt = 0L) }
                     }
                     is StreamEvent.Stopped -> {
                         updateReply(replyId) { it.copy(status = NetMessage.Status.Stopped, tool = null) }
-                        _state.update { it.copy(busy = false) }
+                        _state.update { it.copy(busy = false, busyStartedAt = 0L) }
                     }
                     is StreamEvent.Error -> {
                         updateReply(replyId) { it.copy(status = NetMessage.Status.Error, tool = null) }
-                        _state.update { it.copy(busy = false, error = event.message) }
+                        _state.update { it.copy(busy = false, busyStartedAt = 0L, error = event.message) }
                     }
                     else -> Unit   // Usage / 块级事件：本项目暂不消费
                 }
@@ -253,6 +322,7 @@ class ChatScreenViewModel(
         _state.update { st ->
             st.copy(
                 busy = false,
+                busyStartedAt = 0L,
                 // 把最后一条仍在 Streaming 的回复标成已停止 ——
                 // 否则那个「正在生成」的动画会一直转下去。
                 messages = st.messages.map {
@@ -324,6 +394,18 @@ class ChatScreenViewModel(
                             id = nextId(if (m.role == "user") "u" else "a"),
                             role = if (m.role == "user") NetMessage.Role.User else NetMessage.Role.Assistant,
                             text = m.text,
+                            // v0.14.0：历史里也带执行过程 —— 用户重开会话后
+                            // 仍能看到当时调了哪些工具，与实时流式的呈现一致。
+                            steps = m.execSteps.map { st ->
+                                NetMessage.ExecStep(
+                                    callId = st.callId,
+                                    name = st.name,
+                                    args = st.args,
+                                    result = st.result?.let {
+                                        NetMessage.ExecStep.Result(it.ok, it.text)
+                                    },
+                                )
+                            },
                         )
                     }
                     _state.update { it.copy(messages = list) }

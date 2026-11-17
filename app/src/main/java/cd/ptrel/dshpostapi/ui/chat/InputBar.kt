@@ -12,6 +12,9 @@ import kotlinx.coroutines.withContext
 import androidx.compose.foundation.Image
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.fillMaxSize
+import cd.ptrel.dshpostapi.ui.common.DeepDivingLabel
+import cd.ptrel.dshpostapi.ui.common.WhaleSpinner
+import cd.ptrel.dshpostapi.ui.common.BusyDots
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -131,6 +134,8 @@ fun InputBar(
     attachPanelOpen: Boolean = false,
     /** 已挂上的附件数量。>0 时即使没打字也允许发送。 */
     pendingCount: Int = 0,
+    /** 这一轮开始的时刻（SystemClock.elapsedRealtime，v0.15.1）。0 = 没在跑。 */
+    busyStartedAt: Long = 0L,
     /**
      * 已选图片的缩略图（v0.13.2）。
      *
@@ -465,6 +470,26 @@ fun InputBar(
                     onClick = onOpenStatsPanel,
                 )
 
+                /*
+                 * 兜底式运行提示（v0.15.3）：只有一只小鲸鱼，没有说话。
+                 *
+                 * 主提示在**消息流末尾**（「深度求索中，用时 Ns ···」）——
+                 * 那符合接近法则：状态紧邻它所描述的那一轮。
+                 * 但用户滚上去看历史时，末尾就出了视野。这时输入栏这只小鲸鱼
+                 * 充当「还在跑」的一眼确认，不必滚回去。
+                 *
+                 * 这里刻意**不带文字**：
+                 *   · 带文字会与消息流末尾那行重复，且挤占输入宽度
+                 *   · 兜底要克制，不能喧宾夺主
+                 */
+                if (streaming) {
+                    WhaleSpinner(
+                        size = 18.dp,
+                        swishing = true,
+                        color = colors.processText,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
                 Spacer(Modifier.weight(1f))
 
                 /*
@@ -475,6 +500,19 @@ fun InputBar(
                  * 转的是**整个按钮** —— 圆形是对称的，看起来就是里头的加号在转，
                  * 比"两帧之间换一个图标"顺得多。
                  */
+                /*
+                 * 运行指示（v0.15.0）：鲸鱼摆动 + 三点依次出现。
+                 *
+                 * 为什么放这里（输入栏左侧、⊕ 之前）：
+                 *   · 用户视线在打字时本来就落在输入栏附近，比顶栏更容易注意到
+                 *   · 不占消息区，不挡最后一条内容
+                 *   · 与 ⊕ 相邻但语义不同：左边是「它在跑」，右边是「我要发东西」
+                 *
+                 * 只在 streaming 时出现 —— 空闲时这块完全不占位（不是透明占位），
+                 * 否则会留下一条莫名其妙的空白。
+                 */
+
+
                 if (canAttach) {
                     val spin by animateFloatAsState(
                         targetValue = if (attachPanelOpen) 45f else 0f,
