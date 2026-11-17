@@ -119,6 +119,14 @@ fun GlassSurface(
     cornerRadius: Dp = 16.dp,
     tintAlpha: Float = 0.78f,
     topHighlight: Boolean = true,
+    /**
+     * 底色改成**垂直渐变**（顶部 [tintAlpha] → 底部全透明）。
+     *
+     * 顶栏用它：状态栏区域需要压住壁纸保证标题可读，
+     * 而顶栏底边应当与内容自然衔接 —— 均匀色罩会在两者之间切出硬边，
+     * 看着像「盖了块板子」。
+     */
+    fadeBottom: Boolean = false,
     content: @Composable BoxScope.() -> Unit,
 ) {
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
@@ -135,7 +143,18 @@ fun GlassSurface(
     Box(
         modifier = modifier
             .clip(shape)
-            .background(tint)
+            // v0.18.3：fadeBottom 时用垂直渐变替代纯色。
+            //
+            // 渐变终点取 tint 的 alpha=0，而不是 Color.Transparent ——
+            // 后者是「透明的黑」，在白玻璃上会让底边泛灰；
+            // 同色淡出才是想要的效果。
+            .background(
+                if (fadeBottom) {
+                    Brush.verticalGradient(listOf(tint, tint.copy(alpha = 0f)))
+                } else {
+                    androidx.compose.ui.graphics.SolidColor(tint)
+                },
+            )
             // 内高光 + 边缘厚度：一次 drawWithContent 画完，避免多次叠加。
             .then(
                 if (active) Modifier.drawWithContent {
