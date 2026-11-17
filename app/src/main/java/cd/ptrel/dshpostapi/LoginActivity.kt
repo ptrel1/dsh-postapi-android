@@ -279,8 +279,9 @@ class LoginActivity : AppCompatActivity() {
             try {
                 binding.hostInput.setText(picked.host)
                 binding.usernameInput.setText(picked.username)
-                // 密码留空：历史条目不存密码，换账号应当重输。
-                binding.passwordInput.setText("")
+                // v0.18.1：历史条目现在也存密码，选中即填 ——
+                // 输入框是 textPassword，显示成点，用户点「登录」即可用。
+                binding.passwordInput.setText(picked.password)
             } finally {
                 suppressHostWatcher = false
             }

@@ -222,8 +222,17 @@ object AccountStore {
     /** 历史账号列表的 key（JSON 数组）。 */
     const val KEY_ACCOUNT_HISTORY = "account_history"
 
-    /** 一条历史账号。只有身份，没有凭据。 */
-    data class AccountRef(val host: String, val username: String)
+    /**
+     * 一条历史账号。
+     *
+     * ⚠️ v0.18.1：[password] 是**机密**，与当前账号的密码同等对待 ——
+     * 禁止日志、禁止 Intent、禁止任何序列化外传。
+     *
+     * 它存在加密的 EncryptedSharedPreferences 里（MasterKey 由 Keystore 保管），
+     * 落盘是密文。但请注意：这确实让本机多存了 N 份密码，
+     * 泄露面比「只存当前账号一份」大 —— 这是用户明确要求记住全部密码后接受的取舍。
+     */
+    data class AccountRef(val host: String, val username: String, val password: String = "")
 
     /**
      * 读取历史账号（最多 [MAX_HISTORY] 条，最近的在前）。
@@ -241,7 +250,8 @@ object AccountStore {
                 val o = arr.optJSONObject(i) ?: continue
                 val h = o.optString("host", "")
                 val u = o.optString("username", "")
-                if (h.isNotEmpty() && u.isNotEmpty()) out.add(AccountRef(h, u))
+                val pw = o.optString("password", "")
+                if (h.isNotEmpty() && u.isNotEmpty()) out.add(AccountRef(h, u, pw))
             }
             out
         } catch (e: Exception) {
@@ -259,16 +269,22 @@ object AccountStore {
      * 调用时机是**登录成功之后**（见 LoginFlow）；
      * 失败的登录不进列表，否则用户打错字一次就多一条垃圾记录。
      */
-    fun rememberAccount(context: Context, host: String, username: String) {
+    fun rememberAccount(context: Context, host: String, username: String, password: String) {
         if (host.isBlank() || username.isBlank()) return
         try {
             val prefs = open(context) ?: return
             val existing = loadHistory(context)
                 .filterNot { it.host.equals(host, ignoreCase = true) && it.username == username }
-            val merged = (listOf(AccountRef(host, username)) + existing).take(MAX_HISTORY)
+            // 新登录的排最前；密码一并存下（用户要求「记住全部密码」）。
+            val merged = (listOf(AccountRef(host, username, password)) + existing).take(MAX_HISTORY)
             val arr = org.json.JSONArray()
             merged.forEach { r ->
-                arr.put(org.json.JSONObject().put("host", r.host).put("username", r.username))
+                arr.put(
+                    org.json.JSONObject()
+                        .put("host", r.host)
+                        .put("username", r.username)
+                        .put("password", r.password),
+                )
             }
             prefs.edit().putString(KEY_ACCOUNT_HISTORY, arr.toString()).apply()
         } catch (e: Exception) {

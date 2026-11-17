@@ -221,6 +221,9 @@ object LoginFlow {
                         context = appContext,
                         host = host.baseUrl,
                         username = result.username.ifEmpty { username },
+                        // v0.18.1：用户要求记住全部密码，历史条目也存一份。
+                        // 它落在加密存储里，与当前账号的密码同等保护。
+                        password = password,
                     )
                     autoLoginInFlight = false
                     mainHandler.post {

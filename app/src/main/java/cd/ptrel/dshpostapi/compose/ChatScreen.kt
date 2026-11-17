@@ -35,6 +35,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -202,24 +203,46 @@ fun ChatScreen(
     var locked by remember(state.sessionId) { mutableStateOf(true) }
 
     // ① 用户意图：手指往上拖 → 解锁；拖回底部 → 重新锁定。
-    LaunchedEffect(listState) {
-        var lastPos = 0f
-        snapshotFlow {
-            // 合成一个单调量：第几个 item + 项内偏移，越大越靠下
-            listState.firstVisibleItemIndex.toFloat() * 100_000f +
-                listState.firstVisibleItemScrollOffset.toFloat()
-        }.collect { pos ->
-            if (listState.isScrollInProgress) {
-                // 只有**手指参与**时才改意图（程序调用 followBottom 不经过这里）
-                if (pos < lastPos - 8f) {
-                    locked = false
-                } else if (!listState.canScrollForward) {
-                    // 手动拖到底 → 重新锁定。有人会想「直接滚到底不也该锁上吗」——
-                    // 不。程序滚到底是我们自己干的，那不该改变用户意图。
-                    locked = true
+    //
+    // ⚠️ v0.18.1：这一版是**第三版**，前两版都错在同一个地方 ——
+    // 试图用 isScrollInProgress 判断「是不是用户在滚」。
+    //
+    // 但它的语义是「列表正在滚动」，包括：
+    //   · 手指拖动        ← 只有这个该改意图
+    //   · 惯性滑动
+    //   · **程序自己调 scrollBy（followBottom）**  ← 致命
+    //
+    // followBottom 滚到底时 offset 会快速变化，某些帧因重新布局短暂回退，
+    // 于是 `pos < lastPos - 8f` 成立 → locked 被置 false → 跟随永久停掉。
+    // 用户看到的正是「聊着聊着就不跟了」。
+    //
+    // 现在改用 **nestedScroll**：只有手指拖动才会走 onPreScroll / onPostScroll，
+    // 程序滚动（scrollBy）不经过 nestedScroll 链路。这是 Compose 里唯一
+    // 能可靠区分「谁引起的滚动」的地方。
+    var fingerDelta = 0f
+    val scrollWatcher = androidx.compose.runtime.remember {
+        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+            override fun onPreScroll(available: androidx.compose.ui.geometry.Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): androidx.compose.ui.geometry.Offset {
+                // 手指往上推（available.y < 0）说明用户在看更早的内容 → 解锁
+                if (source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput && available.y < 0f) {
+                    fingerDelta += available.y
+                    if (fingerDelta < -8f) locked = false
                 }
+                return androidx.compose.ui.geometry.Offset.Zero
             }
-            lastPos = pos
+        }
+    }
+    androidx.compose.runtime.LaunchedEffect(listState) {
+        // 滑回底部就重新锁定。「到底」是布局事实，不需要手指参与 ——
+        // 但只在**用户刚动过**之后才检查，否则程序滚到底也会把它锁上，
+        // 而程序滚到底不代表用户改主意了。
+        androidx.compose.runtime.snapshotFlow {
+            listState.isScrollInProgress to !listState.canScrollForward
+        }.collect { (scrolling, atBottom) ->
+            if (!scrolling && atBottom) {
+                fingerDelta = 0f
+                locked = true
+            }
         }
     }
 
@@ -326,7 +349,10 @@ fun ChatScreen(
             MessageList(
                 messages = uiMessages,
                 modifier = Modifier
-                    .fillMaxSize(),
+                    .fillMaxSize()
+                    // v0.18.1：nestedScroll 是唯一能区分「手指拖动」与「程序滚动」的入口。
+                    // 程序调 scrollBy（followBottom）不走这条链路，所以不会再误判成用户上拉。
+                    .nestedScroll(scrollWatcher),
                 listState = listState,
                 // v0.15.3：运行状态作为消息流最后一条（接近法则：紧邻它所描述的那一轮）。
                 busy = state.busy,
