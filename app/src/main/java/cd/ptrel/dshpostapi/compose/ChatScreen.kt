@@ -217,15 +217,60 @@ fun ChatScreen(
             .collect { atBottom -> if (atBottom) following = true }
     }
 
-    LaunchedEffect(lastMessageLen) {
+    /*
+     * 跟随触发（v0.16.3 扩了触发面）。
+     *
+     * ⚠️ 早先只订阅 `lastMessageLen`（最后一条消息的**文本长度**），
+     * 于是漏掉两类「文本没变但布局长高」的情况：
+     *
+     *   ① **流式结束**：busy 由 true 变 false，最后一条会冒出操作栏 + 状态图标，
+     *      整条高度变化，但文本不再增长 → 不触发跟随 → 停在半路。
+     *   ② **命令执行后**：工具调用条目展开/收起、代码块渲染完，
+     *      消息内容高度变化，文本同样没变。
+     *
+     * 现在同时订阅三样：
+     *   · lastMessageLen  —— 流式增量
+     *   · state.busy      —— 开始/结束（结束时会多出操作栏）
+     *   · messages.size   —— 新消息插入
+     *
+     * 仍然只看**意图标志** following，不看布局状态 —— 那是 v0.10.1 就定下的判据。
+     */
+    LaunchedEffect(lastMessageLen, state.busy, state.messages.size) {
         if (state.messages.isEmpty() || !positioned) return@LaunchedEffect
         // 用户正在拖动/惯性滑动：让给他，别抢
         if (listState.isScrollInProgress) return@LaunchedEffect
-        // 用**意图标志**而不是布局状态判断要不要跟（见上方说明）
         if (!following) return@LaunchedEffect
-        // followBottom 每帧吃掉剩余距离的 0.7（见 ScrollToBottom.kt 的长注释）：
-        // 内容每 50ms 离散来一批，直接 scrollToItem 会变成「每 50ms 跳一个台阶」。
         listState.followBottom()
+    }
+
+    /*
+     * 布局高度变化的兜底跟随。
+     *
+     * 上面那个 effect 解决的是「内容变了」，但有一类情况它看不到：
+     * **同一时刻文本没变、busy 没变，而条目的测量高度变了** ——
+     * 典型是工具调用条目从「进行中」切成「已完成」、
+     * 或 Markdown 代码块异步排版完成。
+     *
+     * 做法：监听列表的**布局信息**（总高度 / 最后一个可见项），
+     * 高度一变就补一次跟随。它不是状态变化，所以 snapshotFlow 拿不到，
+     * 只能用 `layoutInfo` 的变化当信号。
+     */
+    LaunchedEffect(listState, following) {
+        if (!following) return@LaunchedEffect
+        snapshotFlow {
+            // 组合一个「当前布局形态」的指纹：总项数 + 最后一个可见项的下标与偏移
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()
+            Triple(info.totalItemsCount, last?.index ?: -1, last?.offset ?: 0)
+        }.collect {
+            if (listState.isScrollInProgress) return@collect
+            if (!following) return@collect
+            // 只有「内容比视口高」时才需要补 —— 否则列表本身不滚动，补了也没用。
+            //
+            // ⚠️ 不会无限循环：followBottom 一次滚到底后 canScrollForward 变 false，
+            // 下次 collect 进来就跳过。滚动期间的 isScrollInProgress 也会挡掉。
+            if (listState.canScrollForward) listState.followBottom()
+        }
     }
 
     // 网络层 UiMessage → 渲染层 UiMessage。转换是 O(n)，跟着消息列表走。

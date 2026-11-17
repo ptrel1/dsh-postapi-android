@@ -308,21 +308,41 @@ fun SessionsScreen(
             }
         }
 
-        // ── 底部：新建会话 ──────────────────────────────────────
-        Box(
+        // ── 底部：新建会话（v0.16.3 改为普通列表行）────────────────
+        //
+        // 早先是个满宽蓝底蓝框的胶囊，在整屏里**五项特征全不同**：
+        //   形状（胶囊 vs 文字行）、背景（浅蓝 vs 白）、边框、宽度（满宽 vs 内容宽）、
+        //   颜色（唯一的一处蓝色）。于是它成了屏幕主角 ——
+        // 而用户 90% 的时间是点**已有会话**，这个按钮是低频动作。
+        // 这是「频率与显著性错配」：越少用的越显眼。
+        //
+        // 现在它长得和列表项一样：白底、无边框、56dp 行高、图标+文字的左对齐布局。
+        // 语义上也对 —— 它本来就是「列表的第 0 项」（新建），
+        // 格式塔的相似性法则要求它和邻居同语法。
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = Space.Screen)
-                .padding(bottom = Space.Screen),
+                .height(56.dp)
+                // 与列表项同样的可点反馈（水波纹只在行内）
+                .clickable(onClick = onNewSession)
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            CapsuleButton(
+            Icon(
+                imageVector = AppIcons.PlusCircle,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(12.dp))
+            Text(
                 text = Res.get(R.string.compat_new_session),
-                leadingIcon = AppIcons.PlusCircle,
-                onClick = onNewSession,
-                modifier = Modifier.fillMaxWidth(),
-                selected = true,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.primary,
             )
         }
+        // 底部留白：让最后一行不贴着屏幕边缘（与输入栏的 16dp 留白一致）
+        Spacer(Modifier.height(16.dp))
     }
     }
 }
