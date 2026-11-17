@@ -154,6 +154,14 @@ class ChatScreenViewModel(
      * 其它一律当成别端内容追加。
      */
     private var selfTurn: Int = -1
+
+    /**
+     * 本设备的客户端标识（v0.17.5）。
+     *
+     * 进程内固定即可 —— 它的用途是「区分同一会话的不同发起方」，
+     * 不是身份认证。重启后换个值也无妨（那时旧连接早断了）。
+     */
+    private val clientId: String = java.util.UUID.randomUUID().toString().take(8)
     private var seq = 0L
 
     /** 生成本地 id。用自增序号而不是 UUID：可读、可测、排序天然稳定。 */
@@ -207,7 +215,7 @@ class ChatScreenViewModel(
                 // v0.15.5：同样去掉 busy 空转 —— 外部轮跑着的时候更要连着。
                 android.util.Log.i("WatchDiag", "connecting watch attempt=" + attempt + " sid=" + current)
                 try {
-                    streamClient.watch(api.watchRequest(current)).collect { frame ->
+                    streamClient.watch(api.watchRequest(current, clientId)).collect { frame ->
                         android.util.Log.i("WatchDiag", "frame: " + frame.javaClass.simpleName)
                         when (frame) {
                             is WatchFrame.Snapshot -> {
@@ -229,7 +237,15 @@ class ChatScreenViewModel(
                                 //
                                 // 现在：turn == 0 表示服务端没给编号（老版本服务端），保守地当成别端内容；
                                 // 否则只要不是本端正在跟随的那一轮，就正常追加。
-                                if (watchedTurn == 0 || watchedTurn != selfTurn) {
+                                // v0.17.5：按**发起方身份**判断，不再看 busy 或 turn。
+                                //
+                                //   clientId == 本端  → 这是我自己那轮的回声，丢弃（正文已由 stream 写入）
+                                //   clientId 是别人  → 别端的内容，正常追加
+                                //   clientId 为空    → 服务端不知道发起方（网页端直连），也追加
+                                //
+                                // 早先看 busy：本端在跑时把别端内容也丢了，
+                                // 表现为「两台 App 同时发消息，流式接收不同步」（用户反馈）。
+                                if (frame.clientId != clientId) {
                                     appendExternal(frame.text)
                                 }
                             }
@@ -386,6 +402,9 @@ class ChatScreenViewModel(
                         // 只在**新会话**时带 cwd：已有会话的 cwd 由它自己决定，
                         // 再传一次要么被忽略、要么在服务端引发「改工作区」的歧义。
                         cwd = if (_state.value.sessionId == null) workspaceCwd else null,
+                        // v0.17.5：告诉服务端「这一轮是谁发起的」，
+                        // 它在 /chat/watch 推送时原样标注，客户端据此丢弃自己的回声。
+                        clientId = clientId,
                     )
         streamJob = viewModelScope.launch {
             try {

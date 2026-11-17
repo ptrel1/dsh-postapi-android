@@ -126,8 +126,12 @@ class DshStreamClient(
             val o = org.json.JSONObject(payload)
             when (o.optString("type")) {
                 "snapshot" -> WatchFrame.Snapshot
-                "text" -> o.optString("text").takeIf { it.isNotEmpty() }?.let { WatchFrame.Text(it) }
-                "reasoning" -> o.optString("text").takeIf { it.isNotEmpty() }?.let { WatchFrame.Reasoning(it) }
+                "text" -> o.optString("text").takeIf { it.isNotEmpty() }?.let {
+                    WatchFrame.Text(it, o.optString("clientId", ""))
+                }
+                "reasoning" -> o.optString("text").takeIf { it.isNotEmpty() }?.let {
+                    WatchFrame.Reasoning(it, o.optString("clientId", ""))
+                }
                 "turn-start" -> WatchFrame.TurnStart(o.optInt("turn", -1))
                 "turn-end" -> WatchFrame.TurnEnd(o.optInt("turn", -1))
                 "done" -> WatchFrame.Done(o.optString("reason", "complete"))
@@ -307,11 +311,17 @@ sealed interface WatchFrame {
      */
     data class TurnStart(val turn: Int) : WatchFrame
 
-    /** 正文增量。 */
-    data class Text(val text: String) : WatchFrame
+    /**
+     * 正文增量。
+     *
+     * [clientId] 是**发起方的身份**（v0.17.5）：服务端在推送时标注「这条是谁发的」。
+     * 客户端据此丢弃自己那轮的回声，而不是靠 busy 这种间接状态推断。
+     * 空串表示服务端不知道（例如网页端直连发起的轮次）—— 那一定不是本端，照常追加。
+     */
+    data class Text(val text: String, val clientId: String = "") : WatchFrame
 
-    /** 思考增量。 */
-    data class Reasoning(val text: String) : WatchFrame
+    /** 思考增量。同样带发起方 [clientId]。 */
+    data class Reasoning(val text: String, val clientId: String = "") : WatchFrame
 
     /** 某一轮结束。同样带 [turn]，用于确认「结束的是哪一轮」。 */
     data class TurnEnd(val turn: Int) : WatchFrame

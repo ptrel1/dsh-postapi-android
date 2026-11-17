@@ -523,9 +523,14 @@ class CompatApi(
      *
      * @return SSE 请求；调用方负责拿到连接并逐行读取 data: 行。
      */
-    fun watchRequest(sessionId: String): Request {
+    fun watchRequest(sessionId: String, clientId: String = ""): Request {
+        // v0.17.5：带上 clientId。服务端在推送每个增量时标注发起方，
+        // 客户端据此丢弃**自己那轮**的回声 —— 而不是靠 busy 推断
+        //（那会在两端同时发消息时把对方的内容也丢掉）。
+        val q = "sessionId=" + java.net.URLEncoder.encode(sessionId, "UTF-8") +
+            "&clientId=" + java.net.URLEncoder.encode(clientId, "UTF-8")
         return Request.Builder()
-            .url(hostBaseUrl.trimEnd('/') + API_PREFIX + "/chat/watch?sessionId=" + java.net.URLEncoder.encode(sessionId, "UTF-8"))
+            .url(hostBaseUrl.trimEnd('/') + API_PREFIX + "/chat/watch?" + q)
             .header("Cookie", cookieHeader())
             .header("User-Agent", MOBILE_UA)
             .header("Accept", "text/event-stream")
@@ -590,8 +595,17 @@ class CompatApi(
         sessionId: String?,
         images: List<PendingImage> = emptyList(),
         cwd: String? = null,
+        /**
+         * 本设备的客户端标识（v0.17.5）。
+         *
+         * 服务端记住「这个会话当前由谁发起」，并在 /chat/watch 推送时标注。
+         * 客户端据此丢弃自己那轮的回声 —— 早先靠 busy 推断，
+         * 会在两端同时发消息时把对方的内容也丢掉。
+         */
+        clientId: String = "",
     ): Request {
         val json = JSONObject().put("prompt", prompt)
+        if (clientId.isNotEmpty()) json.put("clientId", clientId)
         if (!sessionId.isNullOrEmpty()) json.put("sessionId", sessionId)
         // 新会话的工作区（v0.11.0）。服务端按「已有会话用过的 cwd」白名单校验，
         // 不在白名单内返回 403 —— 不信任客户端传的任意路径。
