@@ -60,7 +60,12 @@ class DshStreamClient(
         val call = sseClient.newCall(request)
         try {
             val response = call.execute()
+            android.util.Log.i("WatchDiag", "watch response code=" + response.code + " url=" + request.url)
             if (!response.isSuccessful) {
+                // v0.15.7：把状态码与响应体打进日志。
+                // 早先只给 UI 一句「HTTP xxx」，排查时看不到服务端说了什么。
+                val bodyText = try { response.body?.string().orEmpty().take(300) } catch (e: Exception) { "<read failed>" }
+                android.util.Log.w("WatchDiag", "watch failed code=" + response.code + " body=" + bodyText)
                 trySend(WatchFrame.Failed(if (response.code == 401) "登录已失效，请重新登录" else "HTTP " + response.code))
                 close()
                 return@callbackFlow
@@ -82,10 +87,18 @@ class DshStreamClient(
             }
             close()
         } catch (e: IOException) {
+            android.util.Log.w("WatchDiag", "watch IOException: " + e.javaClass.simpleName + " " + e.message)
             // 主动取消（页面退出/切会话）不是故障，不报错。
             if (!call.isCanceled()) trySend(WatchFrame.Failed("网络中断：" + (e.message ?: "未知")))
             close()
         } catch (e: Exception) {
+            // v0.15.7：这个分支**必须**打日志。
+            // 早先只给 UI 一句「读取失败」，排查时看不到异常类型与栈 ——
+            // 实测就是这里吞掉了真正的错误（2ms 内失败，连 response code 都没打印）。
+            android.util.Log.w(
+                "WatchDiag",
+                "watch EXCEPTION: " + e.javaClass.name + " : " + e.message + " | " + e.stackTraceToString(),
+            )
             trySend(WatchFrame.Failed("读取失败：" + (e.message ?: e.javaClass.simpleName)))
             close()
         }
@@ -94,6 +107,18 @@ class DshStreamClient(
             try { call.cancel() } catch (_: Exception) {}
         }
     }
+        // ⚠️ v0.15.7：**必须** flowOn(IO)。
+        //
+        // callbackFlow 的 block 跑在 collect 的那个线程上，而 startWatching()
+        // 用的是 viewModelScope（Dispatchers.Main）—— 于是 call.execute()
+        // 直接触发 NetworkOnMainThreadException，连接从未建立。
+        //
+        // 实测：每次 watch 都在 2ms 内失败，服务端连一个请求都没收到，
+        // 表现为「进了会话页但收不到外部流式内容」。
+        //
+        // stream() 一直有这行（它从没出过这个问题），watch() 是后加的、漏了。
+        .buffer(capacity = 64, onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST)
+        .flowOn(Dispatchers.IO)
 
     /** 把一帧 JSON 解析成 [WatchFrame]；不认识的类型返回 null（向前兼容）。 */
     private fun parseWatch(payload: String): WatchFrame? {

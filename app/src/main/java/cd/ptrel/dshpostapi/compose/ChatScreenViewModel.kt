@@ -149,8 +149,12 @@ class ChatScreenViewModel(
      * 重连成功会收到 snapshot 帧，此时补拉一次历史 —— 断线期间的内容靠它补齐。
      */
     private fun startWatching() {
+        android.util.Log.i("WatchDiag", "startWatching called, sessionId=" + _state.value.sessionId)
         watchJob?.cancel()
-        val sid = _state.value.sessionId ?: return
+        val sid = _state.value.sessionId ?: run {
+            android.util.Log.w("WatchDiag", "startWatching: sessionId is null, abort")
+            return
+        }
         // v0.15.5：**不要**因为 busy 就不连。
         //
         // 早先这里有一句 `if (busy) return` —— 它挡的恰恰是最常见的情况：
@@ -166,8 +170,10 @@ class ChatScreenViewModel(
                 // 会话换了 / 本端开始发消息 → 退出观察
                 if (current != sid) break
                 // v0.15.5：同样去掉 busy 空转 —— 外部轮跑着的时候更要连着。
+                android.util.Log.i("WatchDiag", "connecting watch attempt=" + attempt + " sid=" + current)
                 try {
                     streamClient.watch(api.watchRequest(current)).collect { frame ->
+                        android.util.Log.i("WatchDiag", "frame: " + frame.javaClass.simpleName)
                         when (frame) {
                             is WatchFrame.Snapshot -> {
                                 // 连上即补拉：断线期间的内容靠这次补齐。
@@ -208,8 +214,9 @@ class ChatScreenViewModel(
                             else -> Unit
                         }
                     }
-                } catch (_: Exception) {
+                } catch (e: Exception) {
                     // 观察流异常不影响主功能，静默重连。
+                    android.util.Log.w("WatchDiag", "watch error: " + e.javaClass.simpleName + " " + e.message)
                 }
                 if (!isActive) break
                 attempt++
@@ -384,6 +391,15 @@ class ChatScreenViewModel(
         // 进入会话即记为「上次活跃」—— 用户下次打开 App 应该回到这里。
         cd.ptrel.dshpostapi.AppPrefs.setLastSessionId(appContext, sessionId)
         _state.update { it.copy(sessionId = sessionId, messages = emptyList(), error = null) }
+        // v0.15.7：**先建 watch，再拉历史**。
+        //
+        // 早先 startWatching() 挂在 history 请求之后 —— 只要 history 失败/超时，
+        // 观察流就永远不建立，表现为「进了会话页但收不到外部流式内容」。
+        // 而「订阅变化」和「加载历史」是两件独立的事，不该互相依赖。
+        //
+        // 顺序也有讲究：先连上再拉历史，能保证「拉历史期间的增量」不会漏
+        // （snapshot 帧会再触发一次 reload 补齐）。
+        startWatching()
         // ⚠️ 必须 withContext(IO)：CompatApi.history() 内部是 OkHttp 的同步 execute()。
         //    viewModelScope 默认跑 Dispatchers.Main，直接调会抛 NetworkOnMainThreadException
         //    （20261116 实测崩溃点就在这里，栈顶是 CompatApi.exec）。
@@ -427,10 +443,8 @@ class ChatScreenViewModel(
                     _state.update { it.copy(error = result.reason) }
                 }
             }
-            // v0.13.0：历史加载完成后开始观察外部改动。
-            // 放在这里而不是函数开头：观察流的 snapshot 帧会触发一次 reload，
-            // 若此时首次历史还没加载完，两次加载会互相覆盖。
-            startWatching()
+            // v0.15.7：观察流已在函数开头启动（见那里的注释）。
+            // 这里不再调用 —— 重复调用会 cancel 掉刚建立的连接。
         }
     }
 
