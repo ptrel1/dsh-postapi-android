@@ -139,7 +139,6 @@ fun ChatScreen(
     // 现在监听「最后一条的内容长度」：新消息、以及流式追加都会变。
     // 用长度而不是整个 text：字符串比较是 O(n)，长度是 O(1)，而截断/改写
     // 在流式场景不存在（只会追加），长度变化已足够触发。
-    val lastMessageLen = state.messages.lastOrNull()?.text?.length ?: 0
     val isAtBottom by rememberIsAtBottom(listState)
 
     // ⚠️ v0.10.2：区分「首次定位」与「流式跟随」。
@@ -173,102 +172,72 @@ fun ChatScreen(
     //
     // 正确的判据是「**用户有没有主动滚开**」，那是输入意图，不是布局状态。
     // 用 listState.isScrollInProgress：手指按着拖动时它为 true，此时不要抢。
-    // ---- 跟随标志（v0.11.2，对齐官方 Web 的做法）----
-    //
-    // 官方的 dsh-client-ui-chat 用**独立于布局的 follow 布尔**：
-    //   scrollToBottom(follow, behavior)  —— follow 由用户滚动位置维护
-    //   [data-chat-following-tail] .scroll { overflow-anchor: none }
-    // 而不是每次问「当前是不是在底部」。
-    //
-    // 为什么必须独立：`canScrollForward` 是布局状态，流式追加瞬间它就是 true，
-    // 于是「刚才还在底部」这个**意图**被误判成「用户滚开了」，跟随中断。
-    // 实测表现为只滚一两下就停。
-    //
-    // 维护方式：订阅滚动位置，用户主动向上滑（firstVisibleItemIndex 回退或
-    // 向后滚动超过阈值）就关掉 follow；滑回底部就重新打开。
-    var following by remember(state.sessionId) { mutableStateOf(true) }
+    /*
+     * ═══ 滚动跟随：锁定底部（v0.16.4 重构）═══
+     *
+     * ## 前面的方案为什么一直在打补丁
+     *
+     * v0.10 ~ v0.16.3 的写法是「**枚举触发原因**」：
+     *   lastMessageLen 变了 → 滚
+     *   busy 变了          → 滚
+     *   messages.size 变了 → 滚
+     *   layoutInfo 变了    → 滚
+     *
+     * 每漏一种信号就多一个 bug。实测漏过两次：
+     *   · 流式结束（文本不再增长，但多出操作栏）
+     *   · 命令执行完（工具条目展开，文本没变）
+     *
+     * ## 现在：只维护一个状态
+     *
+     *   locked == true  → **任何**布局变化都滚到底（不判断原因）
+     *   locked == false → 完全不动
+     *
+     * 「什么变了」不再重要 —— 只要内容比视口高、且用户锁在底部，就跟。
+     * 这样新增任何会改变高度的 UI（新的工具卡片、折叠块）都自动被覆盖，
+     * 不需要再记得回来加一条触发条件。
+     *
+     * 锁的解开**只由手指决定**（位置回退），不由布局状态决定 ——
+     * 那正是 v0.15.10 踩过的坑（canScrollForward 会把「内容变长」误判成「用户上拉」）。
+     */
+    var locked by remember(state.sessionId) { mutableStateOf(true) }
+
+    // ① 用户意图：手指往上拖 → 解锁；拖回底部 → 重新锁定。
     LaunchedEffect(listState) {
-        // ⚠️ v0.15.10：判据从 `!canScrollForward` 改成「位置是否在**回退**」。
-        //
-        // 旧判据的问题：`canScrollForward` 是**布局状态**，内容一增长它就变 true。
-        // 流式过程中用户哪怕只轻碰一下屏幕（产生一次 isScrollInProgress），
-        // 那一帧 canScrollForward 已经是 true → following 置 false → 跟随中断。
-        // 实测表现是「滚一两下就停」，与用户直觉不符：他根本没往上拉。
-        //
-        // 新判据：比较 firstVisibleItemIndex + scrollOffset 合成的偏移量。
-        //   · 值变小（向顶部方向走）→ 用户在看历史 → 停止跟随
-        //   · 回到最底部 → 恢复跟随（见下面第二个 effect）
         var lastPos = 0f
         snapshotFlow {
+            // 合成一个单调量：第几个 item + 项内偏移，越大越靠下
             listState.firstVisibleItemIndex.toFloat() * 100_000f +
                 listState.firstVisibleItemScrollOffset.toFloat()
         }.collect { pos ->
             if (listState.isScrollInProgress) {
                 // 只有**手指参与**时才改意图（程序调用 followBottom 不经过这里）
-                if (pos < lastPos - 8f) following = false
+                if (pos < lastPos - 8f) {
+                    locked = false
+                } else if (!listState.canScrollForward) {
+                    // 手动拖到底 → 重新锁定。有人会想「直接滚到底不也该锁上吗」——
+                    // 不。程序滚到底是我们自己干的，那不该改变用户意图。
+                    locked = true
+                }
             }
             lastPos = pos
         }
     }
-    // 滑回底部就恢复跟随 —— 与上面分开：
-    // 「到底」是布局事实，不需要手指参与。
-    LaunchedEffect(listState) {
-        snapshotFlow { !listState.canScrollForward && !listState.isScrollInProgress }
-            .collect { atBottom -> if (atBottom) following = true }
-    }
 
-    /*
-     * 跟随触发（v0.16.3 扩了触发面）。
-     *
-     * ⚠️ 早先只订阅 `lastMessageLen`（最后一条消息的**文本长度**），
-     * 于是漏掉两类「文本没变但布局长高」的情况：
-     *
-     *   ① **流式结束**：busy 由 true 变 false，最后一条会冒出操作栏 + 状态图标，
-     *      整条高度变化，但文本不再增长 → 不触发跟随 → 停在半路。
-     *   ② **命令执行后**：工具调用条目展开/收起、代码块渲染完，
-     *      消息内容高度变化，文本同样没变。
-     *
-     * 现在同时订阅三样：
-     *   · lastMessageLen  —— 流式增量
-     *   · state.busy      —— 开始/结束（结束时会多出操作栏）
-     *   · messages.size   —— 新消息插入
-     *
-     * 仍然只看**意图标志** following，不看布局状态 —— 那是 v0.10.1 就定下的判据。
-     */
-    LaunchedEffect(lastMessageLen, state.busy, state.messages.size) {
-        if (state.messages.isEmpty() || !positioned) return@LaunchedEffect
-        // 用户正在拖动/惯性滑动：让给他，别抢
-        if (listState.isScrollInProgress) return@LaunchedEffect
-        if (!following) return@LaunchedEffect
-        listState.followBottom()
-    }
-
-    /*
-     * 布局高度变化的兜底跟随。
-     *
-     * 上面那个 effect 解决的是「内容变了」，但有一类情况它看不到：
-     * **同一时刻文本没变、busy 没变，而条目的测量高度变了** ——
-     * 典型是工具调用条目从「进行中」切成「已完成」、
-     * 或 Markdown 代码块异步排版完成。
-     *
-     * 做法：监听列表的**布局信息**（总高度 / 最后一个可见项），
-     * 高度一变就补一次跟随。它不是状态变化，所以 snapshotFlow 拿不到，
-     * 只能用 `layoutInfo` 的变化当信号。
-     */
-    LaunchedEffect(listState, following) {
-        if (!following) return@LaunchedEffect
+    // ② 跟随：只看「锁着没」+「布局变了没」，不看变化的原因。
+    LaunchedEffect(listState, locked) {
+        if (!locked) return@LaunchedEffect
         snapshotFlow {
-            // 组合一个「当前布局形态」的指纹：总项数 + 最后一个可见项的下标与偏移
+            // 布局指纹：总项数 + 最后一个可见项的下标与偏移。
+            // 任何会让内容变高的变化（新 token、操作栏、工具条目展开）都会改动它。
             val info = listState.layoutInfo
             val last = info.visibleItemsInfo.lastOrNull()
             Triple(info.totalItemsCount, last?.index ?: -1, last?.offset ?: 0)
         }.collect {
             if (listState.isScrollInProgress) return@collect
-            if (!following) return@collect
-            // 只有「内容比视口高」时才需要补 —— 否则列表本身不滚动，补了也没用。
-            //
-            // ⚠️ 不会无限循环：followBottom 一次滚到底后 canScrollForward 变 false，
-            // 下次 collect 进来就跳过。滚动期间的 isScrollInProgress 也会挡掉。
+            if (!locked) return@collect
+            // 内容没超出视口时列表根本不滚动，补了也没用。
+            // 这同时是**防止死循环**的闸：followBottom 一次滚到底后
+            // canScrollForward 变 false，下一次 collect 就跳过。
             if (listState.canScrollForward) listState.followBottom()
         }
     }

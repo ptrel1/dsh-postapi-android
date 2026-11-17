@@ -338,6 +338,12 @@ class ChatScreenViewModel(
         val trimmed = text.trim()
         // v0.11.0：允许「只发图片不打字」——与宿主 hasPromptContent 的判据一致。
         if ((trimmed.isEmpty() && images.isEmpty()) || _state.value.busy) return
+        // v0.16.4：即便守卫放行，也确保没有旧 job 在跑。
+        // 正常路径上 busy=false 时旧 job 已结束；这里是防御 ——
+        // 万一有残留（比如 Error 分支清了 busy 但协程还在收尾），
+        // 覆盖 streamJob 会让它变成孤儿，永远不被 cancel。
+        streamJob?.cancel()
+        streamJob = null
 
         val userMsg = NetMessage(nextId("u"), NetMessage.Role.User, trimmed)
         val replyId = nextId("a")
@@ -361,6 +367,7 @@ class ChatScreenViewModel(
                         cwd = if (_state.value.sessionId == null) workspaceCwd else null,
                     )
         streamJob = viewModelScope.launch {
+            try {
             streamClient.stream(request).collect { event ->
                 when (event) {
                     // ⚠️ 这里用 Title 承载 DSH 的 start 帧（见 DshStreamClient 的注释）：
@@ -401,19 +408,46 @@ class ChatScreenViewModel(
                     }
                     // step 帧只用来说明「换了一步」，界面不单独展示（工具条目已足够）。
                     is StreamEvent.Step -> Unit
+                    // ⚠️ v0.16.4：这三个分支**不再**清 busy。
+                    //
+                    // 早先在收到 Done 帧时就 `busy = false`，但那个协程还在 collect ——
+                    // 用户此时发新消息会通过 send() 的 busy 守卫，于是：
+                    //   · 新 stream 被创建，streamJob 被覆盖 → 旧 job 再也不会被 cancel
+                    //   · 旧 job 继续往它的 replyId 写残余帧，与新的交叉写同一份 messages
+                    // 表现就是「中途发送导致前一条流被截断」（用户反馈）。
+                    //
+                    // 现在只标记这条回复的状态，busy 由 job 的 finally 统一清 ——
+                    // 「一轮真正结束」= 协程结束，不是「收到结束帧」。
                     is StreamEvent.Done -> {
                         updateReply(replyId) { it.copy(status = NetMessage.Status.Done, tool = null) }
-                        _state.update { it.copy(busy = false, busyStartedAt = 0L) }
                     }
                     is StreamEvent.Stopped -> {
                         updateReply(replyId) { it.copy(status = NetMessage.Status.Stopped, tool = null) }
-                        _state.update { it.copy(busy = false, busyStartedAt = 0L) }
                     }
                     is StreamEvent.Error -> {
                         updateReply(replyId) { it.copy(status = NetMessage.Status.Error, tool = null) }
-                        _state.update { it.copy(busy = false, busyStartedAt = 0L, error = event.message) }
+                        _state.update { it.copy(error = event.message) }
                     }
                     else -> Unit   // Usage / 块级事件：本项目暂不消费
+                }
+            }
+            } finally {
+                // v0.16.4：**一轮真正结束**在这里才发生（协程结束），不是收到 Done 帧。
+                //
+                // 正常结束、抛异常、被 cancel 都会走到这里 —— busy 一定要清，
+                // 否则界面永远停在「深度求索中」。
+                _state.update { it.copy(busy = false, busyStartedAt = 0L) }
+                // 把仍在 Streaming 的回复收尾（异常/取消路径下不会有 Done 帧）
+                _state.update { st ->
+                    st.copy(
+                        messages = st.messages.map {
+                            if (it.id == replyId && it.status == NetMessage.Status.Streaming) {
+                                it.copy(status = NetMessage.Status.Error, tool = null)
+                            } else {
+                                it
+                            }
+                        },
+                    )
                 }
             }
         }
