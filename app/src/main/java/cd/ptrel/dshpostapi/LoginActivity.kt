@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
+import android.widget.ArrayAdapter
 import android.util.Log
 import android.view.View
 import android.view.inputmethod.EditorInfo
@@ -118,6 +119,29 @@ class LoginActivity : AppCompatActivity() {
             }
         })
 
+        // ===== v0.18.0：输入保持 + 历史账号下拉 =====
+
+        // 用户要求：「没登录成功也应该有保存」。
+        //
+        // 所以这里在**每次输入变化**时写一条草稿（host + username），
+        // 不等登录结果。它进的是独立的 draft 字段，不污染历史账号列表 ——
+        // 那个只收「成功登录过」的（失败的登录进列表只会变成垃圾记录）。
+        val saveDraft = object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) = Unit
+            override fun afterTextChanged(s: Editable?) {
+                if (suppressHostWatcher) return
+                AccountStore.saveDraftIdentity(
+                    this@LoginActivity,
+                    binding.hostInput.text?.toString().orEmpty().trim(),
+                    binding.usernameInput.text?.toString().orEmpty().trim(),
+                )
+            }
+        }
+        binding.usernameInput.addTextChangedListener(saveDraft)
+
+        setupAccountDropdown()
+
         // ===== 冷启动决策（只做一次）=====
         // 为什么用 LoginFlow 的进程级标志而不是 savedInstanceState：
         //   本 Activity 被「退出登录」重新拉起（startActivity(new Intent(this, LoginActivity))）
@@ -201,10 +225,78 @@ class LoginActivity : AppCompatActivity() {
                 binding.passwordInput.setText(account.password)
             }
         } else {
-            val last = LoginDefaults.lastHost(this)
-            if (last != null) applyPrefill(last, "")
+            // v0.18.0：没有成功登录过的账号时，回退到「用户上次**输入**的身份」。
+            //
+            // 这正是用户说的「没登录成功也应该有保存」—— 他可能只输了一半、
+            // 或者登录失败了，下次打开不该看到一个空的登录页。
+            val draft = AccountStore.loadDraftIdentity(this)
+            if (draft != null && draft.first.isNotBlank()) {
+                applyPrefill(draft.first, draft.second)
+            } else {
+                val last = LoginDefaults.lastHost(this)
+                if (last != null) applyPrefill(last, "") 
+            }
         }
     }
+
+    /**
+     * 历史账号下拉（v0.18.0）。
+     *
+     * ## 为什么用 AutoCompleteTextView 而不是自己弹菜单
+     *
+     * TextInputLayout 对 AutoCompleteTextView 有原生支持：焦点进入时展开、
+     * 输入时过滤、选中时回调 —— 自己写一套只会更难看且更难对齐输入法。
+     *
+     * ## 数据来源
+     *
+     * [AccountStore.loadHistory]：只有**成功登录过**的 host+username。
+     * 选中后填 host 与 username，**密码留空** —— 历史条目里本来就不存密码
+     *（密码只在「当前账号」里存一份），换账号时留给用户重输是更安全的选择。
+     *
+     * ## 为什么下拉展开要手动调 showDropDown
+     *
+     * AutoCompleteTextView 默认在做完输入过滤后才展开。预填（setText）之后
+     * 列表是空过滤状态，用户点一下看不到任何选项，会以为没有记忆功能。
+     */
+    private fun setupAccountDropdown() {
+        val history = AccountStore.loadHistory(this)
+        val dropdown = binding.usernameInput
+        accountDropdown = dropdown
+        if (history.isEmpty()) return
+
+        val labels = history.map { it.host + "  ·  " + it.username }
+        val adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_dropdown_item_1line,
+            labels,
+        )
+        dropdown.setAdapter(adapter)
+        dropdown.threshold = 0   // 一点就展开，不用先输一个字
+
+        dropdown.setOnItemClickListener { _, _, position, _ ->
+            val picked = history[position]
+            suppressHostWatcher = true
+            try {
+                binding.hostInput.setText(picked.host)
+                binding.usernameInput.setText(picked.username)
+                // 密码留空：历史条目不存密码，换账号应当重输。
+                binding.passwordInput.setText("")
+            } finally {
+                suppressHostWatcher = false
+            }
+            // 密码框自动聚焦，省一次点击
+            binding.passwordInput.requestFocus()
+        }
+
+        // 点输入框就展开完整列表（否则 threshold=0 只在输入时生效，
+        // 焦点刚进入那一下看不到选项）。
+        dropdown.setOnClickListener {
+            if (dropdown.adapter != null) dropdown.showDropDown()
+        }
+    }
+
+    /** 账号下拉控件（v0.18.0）。null = 没换过布局（旧布局）或没有历史账号。 */
+    private var accountDropdown: android.widget.AutoCompleteTextView? = null
 
     /** 用上次的 host / username 预填；密码永远留空（除非走自动重登）。 */
     private fun applyPrefill(host: String, username: String) {

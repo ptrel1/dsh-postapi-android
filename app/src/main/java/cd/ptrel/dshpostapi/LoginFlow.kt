@@ -214,6 +214,14 @@ object LoginFlow {
                         cookieMaxAgeSeconds = result.cookieMaxAgeSeconds,
                     )
                     LoginDefaults.rememberHost(appContext, host.baseUrl)
+                    // v0.18.0：把这次登录成功的身份记进历史账号（去重置顶），
+                    // 下次可以从登录页的下拉里直接选。
+                    // 只在**成功**后记 —— 失败的登录进列表只会变成垃圾记录。
+                    AccountStore.rememberAccount(
+                        context = appContext,
+                        host = host.baseUrl,
+                        username = result.username.ifEmpty { username },
+                    )
                     autoLoginInFlight = false
                     mainHandler.post {
                         // 种 cookie 必须在**主线程 + loadUrl 之前**完成，并且要 flush()。

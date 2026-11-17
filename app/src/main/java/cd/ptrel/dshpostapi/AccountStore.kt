@@ -195,6 +195,123 @@ object AccountStore {
         }
     }
 
+
+    // ==================== 多账号（v0.18.0）====================
+    //
+    // ## 需求来源
+    //
+    // 用户：
+    //   · 「登录页没有输入保持，没登录成功也应该有保存」
+    //   · 「登录成功后支持下拉框选择」
+    //   · 「用户名也一样」
+    //
+    // ## 为什么另立一存储而不是改 StoredAccount
+    //
+    // 现有的 host/username/password 那组字段承载的是「**当前会话**」——
+    // cookie、过期时间、自动重登都绑在它上面。逐个搬进列表会牵动那套状态机，
+    // 风险远大于收益。
+    //
+    // 所以：
+    //   · 当前账号的完整信息 → 仍走原有字段（一个字节都不动）
+    //   · 历史账号（host + username，**不含密码**）→ 新增一个 JSON 列表
+    //
+    // 历史账号不存密码是有意的：密码只在「当前账号」里存一份。
+    // 用户从下拉选了别的账号时，密码框留给用户重输 ——
+    // 这比把 N 个账号的密码全摊在本地要安全，也避免了「存的还是旧密码」的坑。
+
+    /** 历史账号列表的 key（JSON 数组）。 */
+    const val KEY_ACCOUNT_HISTORY = "account_history"
+
+    /** 一条历史账号。只有身份，没有凭据。 */
+    data class AccountRef(val host: String, val username: String)
+
+    /**
+     * 读取历史账号（最多 [MAX_HISTORY] 条，最近的在前）。
+     *
+     * 解析失败一律返回空列表 —— 历史记录是**便利功能**，
+     * 不该让它的损坏拦住用户登录。
+     */
+    fun loadHistory(context: Context): List<AccountRef> {
+        return try {
+            val prefs = open(context) ?: return emptyList()
+            val raw = prefs.getString(KEY_ACCOUNT_HISTORY, null) ?: return emptyList()
+            val arr = org.json.JSONArray(raw)
+            val out = ArrayList<AccountRef>(arr.length())
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                val h = o.optString("host", "")
+                val u = o.optString("username", "")
+                if (h.isNotEmpty() && u.isNotEmpty()) out.add(AccountRef(h, u))
+            }
+            out
+        } catch (e: Exception) {
+            Log.w(TAG, "read account_history failed (" + e.javaClass.simpleName + ")")
+            emptyList()
+        }
+    }
+
+    /**
+     * 记一条历史账号（去重后置顶）。
+     *
+     * 去重按 **host + username 组合** —— 同一个用户名在测试服和正式服上是两个账号，
+     * 只按 username 去重会让用户丢掉其中一个。
+     *
+     * 调用时机是**登录成功之后**（见 LoginFlow）；
+     * 失败的登录不进列表，否则用户打错字一次就多一条垃圾记录。
+     */
+    fun rememberAccount(context: Context, host: String, username: String) {
+        if (host.isBlank() || username.isBlank()) return
+        try {
+            val prefs = open(context) ?: return
+            val existing = loadHistory(context)
+                .filterNot { it.host.equals(host, ignoreCase = true) && it.username == username }
+            val merged = (listOf(AccountRef(host, username)) + existing).take(MAX_HISTORY)
+            val arr = org.json.JSONArray()
+            merged.forEach { r ->
+                arr.put(org.json.JSONObject().put("host", r.host).put("username", r.username))
+            }
+            prefs.edit().putString(KEY_ACCOUNT_HISTORY, arr.toString()).apply()
+        } catch (e: Exception) {
+            Log.w(TAG, "write account_history failed (" + e.javaClass.simpleName + ")")
+        }
+    }
+
+    /**
+     * 记住「用户正在输入的身份」（v0.18.0）。
+     *
+     * 用户要求「没登录成功也应该有保存」—— 所以这条在**输入变化时**就写，
+     * 不等登录结果。存在独立的草稿字段里，不污染历史账号列表
+     * （那个只收成功登录过的）。
+     */
+    fun saveDraftIdentity(context: Context, host: String, username: String) {
+        try {
+            val prefs = open(context) ?: return
+            prefs.edit()
+                .putString(KEY_DRAFT_HOST, host)
+                .putString(KEY_DRAFT_USERNAME, username)
+                .apply()
+        } catch (e: Exception) {
+            Log.w(TAG, "write draft identity failed (" + e.javaClass.simpleName + ")")
+        }
+    }
+
+    /** 读取上次输入的身份（登录页预填用）。 */
+    fun loadDraftIdentity(context: Context): Pair<String, String>? {
+        return try {
+            val prefs = open(context) ?: return null
+            val h = prefs.getString(KEY_DRAFT_HOST, "").orEmpty()
+            val u = prefs.getString(KEY_DRAFT_USERNAME, "").orEmpty()
+            if (h.isEmpty() && u.isEmpty()) null else (h to u)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    const val KEY_DRAFT_HOST = "draft_host"
+    const val KEY_DRAFT_USERNAME = "draft_username"
+
+    /** 历史账号最多保留条数。10 条足够覆盖真实使用，又不会把下拉框撑爆。 */
+    const val MAX_HISTORY = 10
     /**
      * 读取当前保存的账号。
      *

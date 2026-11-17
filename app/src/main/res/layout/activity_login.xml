@@ -79,8 +79,17 @@
                 android:layout_marginTop="12dp"
                 android:hint="@string/label_username">
 
-                <com.google.android.material.textfield.TextInputEditText
+                <!--
+                  v0.18.0：改成 MaterialAutoCompleteTextView —— 用户可以从下拉里
+                  选历史登录过的账号。TextInputLayout 对它有原生支持（过滤器、
+                  展开动画都由 Material 负责），换成自己弹菜单只会更难对齐输入法。
+
+                  用 style 而不是直接换类名：Material 要求 AutoComplete 在
+                  TextInputLayout 里必须带这个 style，否则主题会套错、下拉文字发灰。
+                -->
+                <com.google.android.material.textfield.MaterialAutoCompleteTextView
                     android:id="@+id/usernameInput"
+                    style="@style/Widget.Material3.AutoCompleteTextView.OutlinedBox"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:autofillHints="username"
