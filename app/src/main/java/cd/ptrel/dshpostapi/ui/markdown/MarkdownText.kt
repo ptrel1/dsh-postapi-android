@@ -70,6 +70,9 @@ import cd.ptrel.dshpostapi.ui.theme.markdownBodyStyle
 import cd.ptrel.dshpostapi.ui.theme.MarkdownHeadingStyles
 import cd.ptrel.dshpostapi.ui.theme.MarkdownInlineCodeStyle
 import cd.ptrel.dshpostapi.ui.theme.MarkdownMarkerStyle
+import com.mikepenz.markdown.compose.elements.MarkdownTable
+import com.mikepenz.markdown.compose.elements.MarkdownTableHeader
+import com.mikepenz.markdown.compose.elements.MarkdownTableRow
 import cd.ptrel.dshpostapi.ui.theme.MarkdownTableStyle
 import cd.ptrel.dshpostapi.ui.theme.SimpleChatTypography
 import kotlin.math.ceil
@@ -261,7 +264,7 @@ private fun MarkdownBlockView(text: String, modifier: Modifier) {
         components = markdownComponents(
             codeFence = collapsibleCodeFence,
             codeBlock = highlightedCodeBlock,
-            table = scrollableTable,
+            table = wrappingTable,
             unorderedList = bulletList,
             orderedList = orderedList,
             checkbox = taskCheckbox,
@@ -453,14 +456,61 @@ private val CollapsedCodeHeight = 300.dp
  *
  * 只包一层、其余一律走库的默认实现，视觉与改造前一致。
  */
-private val scrollableTable: MarkdownComponent = { model ->
+/*
+ * ═══ 表格：单元格自动换行（v0.17.4）═══
+ *
+ * ## 问题
+ *
+ * 库的 `MarkdownTableRow` / `MarkdownTableHeader` 有 `maxLines` 参数，默认 1。
+ * 于是长单元格被截断成 `/chat/str…`（用户截图反馈）——
+ * 而表格**外面**已经有横向滚动，本该能横向查看完整内容，
+ * 结果每格都只剩一行几个字，横滚也看不到全文。
+ *
+ * ## 做法
+ *
+ * 不用库默认的 table 组件，直接调 `MarkdownTable` 并显式给 maxLines 一个足够大的值。
+ * 单元格内**自动换行**，列宽按内容自然宽度，外层横向滚动负责查看超出屏幕的部分。
+ *
+ * 为什么不是 `Int.MAX_VALUE`：Compose 的 Text 对极大 maxLines 的处理
+ * 在某些版本会退化成不换行。取 100 行已经远超任何真实表格单元格。
+ */
+private val wrappingTable: MarkdownComponent = { model ->
     Box(
         Modifier
-            // 横滚优先于消息索引的左滑（§34.4）
             .preferHorizontalScroll()
             .horizontalScroll(rememberScrollState()),
     ) {
-        baseComponents.table(model)
+        MarkdownTable(
+            content = model.content,
+            node = model.node,
+            style = model.typography.table,
+            headerBlock = { cellContent, cellNode, cellWidth, cellStyle ->
+                // 精确签名（从 kotlin_module 元数据取）：
+                //   MarkdownTableHeader(content, header, tableWidth: Dp, style,
+                //                       verticalAlignment, maxLines, overflow, annotatorSettings)
+                MarkdownTableHeader(
+                    content = cellContent,
+                    header = cellNode,
+                    tableWidth = cellWidth,
+                    style = cellStyle,
+                    maxLines = 100,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Clip,
+                )
+            },
+            rowBlock = { cellContent, cellNode, cellWidth, cellStyle ->
+                //   MarkdownTableRow(content, header, tableWidth: Dp, style,
+                //                    rowIndex, verticalAlignment, maxLines, overflow, annotatorSettings)
+                MarkdownTableRow(
+                    content = cellContent,
+                    header = cellNode,
+                    tableWidth = cellWidth,
+                    style = cellStyle,
+                    rowIndex = 0,
+                    maxLines = 100,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Clip,
+                )
+            },
+        )
     }
 }
 

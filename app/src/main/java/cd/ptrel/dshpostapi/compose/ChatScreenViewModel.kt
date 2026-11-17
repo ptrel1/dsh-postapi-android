@@ -137,6 +137,23 @@ class ChatScreenViewModel(
 
     private var externalTurnSeq = 0
     private var currentExternalId: String = "external-0"
+
+    /**
+     * /chat/watch 当前跟随的轮次编号（v0.17.4）。
+     *
+     * 服务端在 turn-start / turn-end 里带了 turn，客户端早先丢掉了它 ——
+     * 于是无法区分「这条 text 属于哪一轮」。
+     */
+    private var watchedTurn: Int = 0
+
+    /**
+     * 本端通过 /chat/stream 发起的那一轮的 turn 编号（v0.17.4）。
+     *
+     * -1 = 未知。服务端在 start 帧里给 turn 后写入。
+     * /chat/watch 收到 turn == selfTurn 的 text 是本端回声，丢弃；
+     * 其它一律当成别端内容追加。
+     */
+    private var selfTurn: Int = -1
     private var seq = 0L
 
     /** 生成本地 id。用自增序号而不是 UUID：可读、可测、排序天然稳定。 */
@@ -204,13 +221,17 @@ class ChatScreenViewModel(
                                 if (_state.value.pendingQuestion != null) {
                                     _state.update { it.copy(pendingQuestion = null) }
                                 }
-                                // v0.15.5：本端正在发送时，这条 Text 是本端自己那轮的回声 ——
-                                // 已经由 /chat/stream 追加进正文了，这里再加一遍会重复。
+                                // v0.17.4：按 **turn 编号** 判断是不是别端的内容。
                                 //
-                                // 早先靠「busy 时不建立 watch 连接」回避这个问题，
-                                // 代价是外部轮永远连不上（见 startWatching 注释）。
-                                // 现在改成「连着但丢帧」——精确得多。
-                                if (!_state.value.busy) appendExternal(frame.text)
+                                // 早先看 `busy` —— 但 busy 只表示「本端忙不忙」，
+                                // 不是「这条内容是谁的」。本端在跑时，另一端的正常流式内容
+                                // 也被一起丢掉了，表现为「两台 App 同时发消息，流式接收不同步」。
+                                //
+                                // 现在：turn == 0 表示服务端没给编号（老版本服务端），保守地当成别端内容；
+                                // 否则只要不是本端正在跟随的那一轮，就正常追加。
+                                if (watchedTurn == 0 || watchedTurn != selfTurn) {
+                                    appendExternal(frame.text)
+                                }
                             }
                             // v0.15.2：把**外部**轮的起止也映射到 busy ——
                             // 网页端在跑时 App 也该显示「深度求索中」，否则两端行为一致不了。

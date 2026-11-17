@@ -128,8 +128,8 @@ class DshStreamClient(
                 "snapshot" -> WatchFrame.Snapshot
                 "text" -> o.optString("text").takeIf { it.isNotEmpty() }?.let { WatchFrame.Text(it) }
                 "reasoning" -> o.optString("text").takeIf { it.isNotEmpty() }?.let { WatchFrame.Reasoning(it) }
-                "turn-start" -> WatchFrame.TurnStart
-                "turn-end" -> WatchFrame.TurnEnd
+                "turn-start" -> WatchFrame.TurnStart(o.optInt("turn", -1))
+                "turn-end" -> WatchFrame.TurnEnd(o.optInt("turn", -1))
                 "done" -> WatchFrame.Done(o.optString("reason", "complete"))
                 "questions" -> parseQuestions(o)
                 "question-ready" -> WatchFrame.QuestionReady
@@ -296,8 +296,16 @@ sealed interface WatchFrame {
     /** 连接建立，服务端给了进入游标。此时可以拉一次历史补齐。 */
     data object Snapshot : WatchFrame
 
-    /** 某一轮开始。 */
-    data object TurnStart : WatchFrame
+    /**
+     * 某一轮开始。
+     *
+     * ⚠️ v0.17.4：带上 [turn] 编号。
+     *
+     * 早先是无参 object —— 服务端明明发了 `turn`，客户端丢掉了。
+     * 后果：**多端同时运行时无法区分「这一轮是不是我自己发起的」**。
+     * 本端发消息时另一端的内容会被当成回声丢掉（见 ChatScreenViewModel 的注释）。
+     */
+    data class TurnStart(val turn: Int) : WatchFrame
 
     /** 正文增量。 */
     data class Text(val text: String) : WatchFrame
@@ -305,8 +313,8 @@ sealed interface WatchFrame {
     /** 思考增量。 */
     data class Reasoning(val text: String) : WatchFrame
 
-    /** 某一轮结束。 */
-    data object TurnEnd : WatchFrame
+    /** 某一轮结束。同样带 [turn]，用于确认「结束的是哪一轮」。 */
+    data class TurnEnd(val turn: Int) : WatchFrame
 
     /** 整个 turn 结束（[reason] 是宿主的结束原因）。 */
     data class Done(val reason: String) : WatchFrame
