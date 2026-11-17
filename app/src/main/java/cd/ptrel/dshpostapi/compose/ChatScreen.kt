@@ -36,6 +36,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -99,6 +100,10 @@ fun ChatScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     var input by remember { mutableStateOf("") }
+
+    /** 输入栏实测高度（px→dp）。用于给消息列表留底部空间 —— 见 contentPadding。 */
+    var inputBarHeight by remember { mutableStateOf(0.dp) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
 
     // ---- 待发送图片（v0.11.0）----
     // 读成 PendingImage 而不是留着 Uri：
@@ -388,7 +393,15 @@ fun ChatScreen(
                     start = 16.dp,
                     end = 16.dp,
                     top = 12.dp,
-                    bottom = 220.dp,
+                    // v0.18.4：不再写死 220dp。
+                    //
+                    // 220dp 是按「多行文字 + 图片缩略图 + 按钮排」的最坏情况估计的，
+                    // 单行时输入栏只有 ~120dp，多出来的 100dp 就是用户看到的
+                    // 「拉到底下面还空一块」（截图反馈）。
+                    //
+                    // 改成读取输入栏的实测高度；还没量出来时给个保守下限，
+                    // 避免首帧内容被压在输入栏底下。
+                    bottom = if (inputBarHeight > 0.dp) inputBarHeight + 12.dp else 140.dp,
                 ),
                 // 其余回调全部用默认值：本项目暂不支持重新生成/编辑/分叉/朗读。
                 // 依赖默认值而不是传空 lambda —— 语义上「这个功能不存在」，
@@ -405,7 +418,19 @@ fun ChatScreen(
             }
 
             InputBar(
-                modifier = androidx.compose.ui.Modifier.align(androidx.compose.ui.Alignment.BottomCenter),
+                modifier = androidx.compose.ui.Modifier
+                    .align(androidx.compose.ui.Alignment.BottomCenter)
+                    // v0.18.4：量出输入栏真实高度，给消息列表留出**恰好**的底部空间。
+                    //
+                    // 写死 220dp 时单行输入栏只占 ~120dp，多出的 100dp 表现为
+                    // 「拉到底下面还空一块」。
+                    .onGloballyPositioned { coords ->
+                        val h = with(density) { coords.size.height.toDp() }
+                        // 只在变化超过 1dp 时写状态，避免每帧触发重组。
+                        if (kotlin.math.abs((h - inputBarHeight).value) > 1f) {
+                            inputBarHeight = h
+                        }
+                    },
                 text = input,
                 onTextChange = { input = it },
                 // DSH 侧没有「思考档位」开关（模型由服务端决定）。
