@@ -13,7 +13,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.fillMaxSize
 import cd.ptrel.dshpostapi.ui.common.DeepDivingLabel
-import cd.ptrel.dshpostapi.ui.common.WhaleTail
+import cd.ptrel.dshpostapi.ui.common.SpinRing
 import cd.ptrel.dshpostapi.ui.common.BusyDots
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -525,7 +525,17 @@ fun InputBar(
                  *   · 兜底要克制，不能喧宾夺主
                  */
                 if (streaming) {
-                    WhaleTail(size = 16.dp, swishing = true)
+                    // v0.18.7：尾巴 → 转圈。
+                    //
+                    // 用户截图指出同一屏出现两个鲸鱼尾巴（消息流末尾 + 这里），重复。
+                    //
+                    // 这两处的**角色本来就不同**：
+                    //   · 消息流末尾 —— 主要指示器（近邻原则：紧挨它所描述的那一轮）
+                    //   · 输入栏左下 —— 兜底，用户把末尾滚出视野时才注意到
+                    //
+                    // 兜底用「进程正在运行」的通用符号（转圈）比复用品牌符号更合适：
+                    // 两者一眼能区分，也符合「兜底要克制、不能喧宾夺主」的原则。
+                    SpinRing(size = 16.dp, strokeWidth = 2.dp)
                     Spacer(Modifier.width(8.dp))
                 }
                 Spacer(Modifier.weight(1f))
