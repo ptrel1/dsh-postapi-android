@@ -265,7 +265,24 @@ fun InputBar(
                 //
                 // 注意：输入栏在滚动时**位置不变**（固定在底部），
                 // 所以它的模糊结果同样可以长期缓存 —— 与顶栏一样是静态受益者。
-                .background(glassTint)
+                // v0.18.6：垂直渐变替代纯色。
+                //
+                // 只给输入栏加 —— 它是全屏唯一「应该显得有实体厚度」的元素：
+                //   · 顶栏已经用上深下透（v0.18.3）表示「淡出到内容」
+                //   · 消息区是内容本身，叠渐变只会显脏
+                //
+                // 方向遵循全局光照（光从上方来）：顶部略浅、底部略深，
+                // 与已有的 1px 顶边高光形成一致的光照声明。
+                // 幅度刻意压得很小（±6% 亮度），多了就会变成「塑料感」。
+                .background(
+                    if (glassQuality == cd.ptrel.dshpostapi.ui.common.GlassQuality.OFF) {
+                        androidx.compose.ui.graphics.SolidColor(glassTint)
+                    } else {
+                        androidx.compose.ui.graphics.Brush.verticalGradient(
+                            listOf(lighten(glassTint, 0.06f), glassTint, darken(glassTint, 0.05f)),
+                        )
+                    },
+                )
                 /*
                  * 按住说话：挂在**整条输入栏**上，而不是输入框上。
                  *
@@ -840,3 +857,19 @@ private fun PendingThumb(b64: String, contentDescription: String) {
 }
 
 private fun Color.luminance(): Float = 0.299f * red + 0.587f * green + 0.114f * blue
+
+/** 提亮（模拟玻璃上沿受光）。amount 是往白色靠的比例。 */
+private fun lighten(c: androidx.compose.ui.graphics.Color, amount: Float) = androidx.compose.ui.graphics.Color(
+    red = c.red + (1f - c.red) * amount,
+    green = c.green + (1f - c.green) * amount,
+    blue = c.blue + (1f - c.blue) * amount,
+    alpha = c.alpha,
+)
+
+/** 压暗（模拟玻璃下沿的自阴影）。 */
+private fun darken(c: androidx.compose.ui.graphics.Color, amount: Float) = androidx.compose.ui.graphics.Color(
+    red = c.red * (1f - amount),
+    green = c.green * (1f - amount),
+    blue = c.blue * (1f - amount),
+    alpha = c.alpha,
+)
