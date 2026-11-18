@@ -1,5 +1,15 @@
 package cd.ptrel.dshpostapi.compose
 
+import androidx.compose.ui.draw.clip
+import androidx.compose.material3.Icon
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.Row
+import cd.ptrel.dshpostapi.ui.common.AppIcons
+import cd.ptrel.dshpostapi.data.Res
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -266,7 +276,7 @@ fun ChatScreen(
             // 内容没超出视口时列表根本不滚动，补了也没用。
             // 这同时是**防止死循环**的闸：followBottom 一次滚到底后
             // canScrollForward 变 false，下一次 collect 就跳过。
-            if (listState.canScrollForward) listState.followBottom()
+            if (listState.canScrollForward) listState.followBottom(density)
         }
     }
 
@@ -468,6 +478,51 @@ fun ChatScreen(
                 statsPanelOpen = false,
                 onOpenStatsPanel = {},
             )
+            // ── v0.18.5：两个跳转按钮 ────────────────────────────────
+            //
+            // 只在**不在底部**时出现。理由：在底部时这两个按钮都是「我已经在的位置」，
+            // 常驻会让右下角一直有两块浮层，遮挡阅读。
+            //
+            // 位置在输入栏正上方：那是视线自然停留的地方（用户刚打完字），
+            // 也避免与输入栏的发送键重叠。
+            if (!isAtBottom) {
+                Row(
+                    modifier = Modifier
+                        .align(androidx.compose.ui.Alignment.BottomEnd)
+                        // 输入栏高度 + 一点余量：贴着输入栏上沿，不压住它
+                        .padding(
+                            end = 16.dp,
+                            bottom = (if (inputBarHeight > 0.dp) inputBarHeight else 140.dp) + 12.dp,
+                        ),
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+                ) {
+                    // 跳到本题开头：最后一条**用户**消息的位置。
+                    //
+                    // 日常聊天里读长回答时最常用的动作 —— 想重看这道题是怎么问的。
+                    // 写代码时反而少用（那边更关心最新输出），所以放在次要位置（左侧）。
+                    JumpChip(
+                        text = "跳到本题",
+                        icon = AppIcons.ArrowUp,
+                        onClick = {
+                            val idx = jumpToQuestionIndex(uiMessages)
+                            if (idx >= 0) {
+                                scope.launch { listState.animateScrollToItem(idx) }
+                                // 手动跳转视为用户主动离开底部 → 解锁跟随，
+                                // 否则下一帧就被程序拉回底部，按钮等于没用。
+                                locked = false
+                            }
+                        },
+                    )
+                    JumpChip(
+                        text = Res.get(R.string.chat_scroll_bottom),
+                        icon = AppIcons.ArrowDown,
+                        onClick = {
+                            scope.launch { listState.animateScrollToItem(uiMessages.lastIndex) }
+                            locked = true
+                        },
+                    )
+                }
+            }
         }
     }
     }
@@ -665,4 +720,65 @@ fun PendingQuestionDialog(
             }
         },
     )
+}
+
+/**
+ * 找到「本次提问」在列表中的下标（v0.18.5）。
+ *
+ * 判据：**最后一条 role == USER 的消息**。
+ *
+ * 为什么这样就够 —— 一轮对话的结构是「用户提问 → 助手回答」，
+ * 所以最后一条用户消息必然是本轮提问的开头。不需要额外的 turn 编号，
+ * 也不依赖服务端给任何东西。
+ *
+ * 边界：
+ *   · 没有用户消息（空会话）→ 返回 -1，调用方不动作
+ *   · 最后一条用户消息已经是第一条 → 跳过去等于回到顶部，语义上正确
+ */
+private fun jumpToQuestionIndex(messages: List<cd.ptrel.dshpostapi.ui.chat.UiMessage>): Int {
+    for (i in messages.indices.reversed()) {
+        if (messages[i].role == cd.ptrel.dshpostapi.ui.chat.MessageRole.USER) return i
+    }
+    return -1
+}
+
+/**
+ * 浮动跳转胶囊（v0.18.5）。
+ *
+ * 半透明底 + 描边，与玻璃表面同一套语言 —— 但**不做模糊**：
+ * 它浮在内容之上且会移动，每帧重算模糊不值得（同 GlassSurface 的判断）。
+ */
+@Composable
+private fun JumpChip(
+    text: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit,
+) {
+    val colors = cd.ptrel.dshpostapi.ui.theme.LocalChatColors.current
+    Row(
+        modifier = Modifier
+            .clip(androidx.compose.foundation.shape.CircleShape)
+            .background(colors.card.copy(alpha = 0.86f))
+            .border(
+                1.dp,
+                colors.outline.copy(alpha = 0.5f),
+                androidx.compose.foundation.shape.CircleShape,
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(16.dp),
+        )
+        androidx.compose.foundation.layout.Spacer(Modifier.size(4.dp))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
 }

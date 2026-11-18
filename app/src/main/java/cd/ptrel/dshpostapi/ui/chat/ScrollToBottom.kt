@@ -106,36 +106,38 @@ private const val FollowFraction = 0.7f
  * 最后一条还在视口外（`distanceToBottom` 返回无穷）时不算跟随，是**追平** ——
  * 那次直接跳，没有台阶可摊。
  */
-suspend fun LazyListState.followBottom() {
-    // ⚠️ v0.16.2：改回**一次到位**。
+suspend fun LazyListState.followBottom(density: androidx.compose.ui.unit.Density) {
+    // ⚠️ v0.18.5：**限速追赶**。
     //
-    // 早先这里是 `scrollBy(remaining * 0.7)`，注释里自认「代价是最新一行被裁掉不到一行」，
-    // 说是拿「最后一行完整可见」换「运动连续」。**这个取舍是错的**：
+    // 前两版都走了极端：
+    //   · `scrollBy(remaining * 0.7)` —— 永远差 30%，每帧在「贴上了/又差一点」
+    //     之间来回 → 一闪一闪（v0.16.2 前的用户反馈）
+    //   · `scrollBy(remaining)` 一次到位 —— 追得干净，但内容一多就成了**瞬移**，
+    //     眼睛跟不上（v0.18.5 的用户反馈「滚动到底部的速度太快了」）
     //
-    // 它假设「滚一次之后内容不再长」，但流式每 50ms 就长一批 ——
-    // 于是永远差 30% 追不上：长 10px 滚 7px，剩 3px；再长 10px 滚 9px，剩 4px……
-    // 每一帧都在「几乎贴上又差一点」之间来回，坐实了「一闪一闪」（用户反馈）。
+    // 现在：每帧最多前进 [MaxFollowStepPx]，剩余距离大于它就分多帧追上。
+    //   · 小增量（流式每批几行）→ 一帧追平，没有延迟感
+    //   · 大增量（一次性来一大批）→ 分几帧平滑滑过去，不瞬移
     //
-    // 关键事实：列表是**顶部为原点**（reverseLayout = false），
-    // 流式消息在自己的**底边**长高，屏幕上方已显示的内容纹丝不动。
-    // 所以「直接跳到底」不会产生任何视觉跳变 —— 该有的平滑它本来就有。
-    //
-    // 0.7 那个做法真正解决的问题（每批 token 之间跳台阶）不存在：
-    // 内容本来就是**离散到批**的，一次滚到底和一次滚 70% 的视觉差异，
-    // 远小于「永远差一点」的持续抖动。
+    // 为什么不用 animateScrollToItem：它是**中断式**动画，流式每 50ms 就重新发起
+    // 一次，会被反复取消重启，表现为抖动。分帧限速是连续的，天然适配。
+    val maxStep = with(density) { MaxFollowStepDp.toPx() }
     val remaining = distanceToBottom()
     when {
         !remaining.isFinite() -> scrollToBottom()
-        remaining > 0f -> scrollBy(remaining)
-        /*
-         * 兜底。走到这里意味着 `canScrollForward` 为真（调用方保证）而距离算出来是 0 ——
-         * 只可能是内边距那一段的边界算不准。此时退回已知正确的"直接跳"：
-         * 少一次平滑无所谓，**停死**（新字永远停在屏外）才是不能接受的。
-         * 而且它落到末尾后 `canScrollForward` 就变假，这条不会一直触发。
-         */
-        canScrollForward -> scrollToBottom()
+        remaining <= 0f -> if (canScrollForward) scrollToBottom() else Unit
+        remaining <= maxStep -> scrollBy(remaining)
+        else -> scrollBy(maxStep)
     }
 }
+
+/**
+ * 跟随的单帧步进上限（px，dp 在下面换算）。
+ *
+ * 取 ~6dp：60fps 下约 360dp/s，比人手滑动（~1000dp/s）慢、
+ * 比内容增长速度（流式每批几十 dp）快 —— 结果是小增量即时追平、大增量平滑追上。
+ */
+private val MaxFollowStepDp = 6.dp
 
 /** 同 [isAtBottom]，状态化版本，供 UI 订阅（回到底部按钮的显隐）。 */
 @Composable
