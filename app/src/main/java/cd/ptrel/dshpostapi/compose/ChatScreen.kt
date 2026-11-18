@@ -606,8 +606,14 @@ fun ChatScreen(
             if (diagnosticsEnabled) {
                 Column(
                     modifier = Modifier
-                        .align(androidx.compose.ui.Alignment.TopStart)
-                        .padding(start = 12.dp, top = 64.dp)
+                        // v0.19.3：移到右上角。
+                        //
+                        // 原来在左上角，与顶栏标题、正文首行抢同一块区域 ——
+                        // 那是视线最先落下的地方，浮层放这里等于挡住最该读的内容。
+                        // 右侧本来只偶尔有「跳到本题/回到底部」按钮（且在底部），
+                        // 上方是空的。
+                        .align(androidx.compose.ui.Alignment.TopEnd)
+                        .padding(end = 12.dp, top = 64.dp)
                         .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
                         .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.65f))
                         .padding(horizontal = 8.dp, vertical = 6.dp),
