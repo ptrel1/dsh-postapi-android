@@ -111,6 +111,17 @@ class ChatScreenViewModel(
          * 非 null 时 UI 弹出回答面板。用户在 App 里提交后走 /chat/answer。
          */
         val pendingQuestion: CompatApi.PendingQuestion? = null,
+
+        /**
+         * 诊断计数（v0.19.1）。只在诊断模式开启时被界面读取。
+         *
+         * 排查「流式重复 / 漏字 / 多端不同步」时，这几个数字是唯一判据：
+         *   · 收到多少帧、丢弃多少帧 —— 判断去重是否生效
+         *   · watch 是否连着 —— 判断是不是断了
+         */
+        val diagTextFrames: Int = 0,
+        val diagDroppedFrames: Int = 0,
+        val diagWatchConnected: Boolean = false,
     )
 
     private val _state = MutableStateFlow(UiState())
@@ -270,6 +281,13 @@ class ChatScreenViewModel(
                                 // 但那种情况本来就极少，且下次 reload 会补上。
                                 val dropAsEcho = frame.clientId == clientId ||
                                     (frame.clientId.isEmpty() && _state.value.busy)
+                                // v0.19.1：诊断计数 —— 排查同步问题时这是唯一判据。
+                                _state.update {
+                                    it.copy(
+                                        diagTextFrames = it.diagTextFrames + 1,
+                                        diagDroppedFrames = it.diagDroppedFrames + if (dropAsEcho) 1 else 0,
+                                    )
+                                }
                                 if (!dropAsEcho) {
                                     appendExternal(frame.text)
                                 }

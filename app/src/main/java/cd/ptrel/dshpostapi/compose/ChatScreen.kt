@@ -100,7 +100,8 @@ fun ChatScreen(
     /** 左上返回：回会话列表。 */
     onBack: () -> Unit = {},
     /** 右上新建会话。 */
-    onNewChat: () -> Unit = {},
+    /** 打开设置（v0.19.1）。顶栏右侧按钮。 */
+    onSettings: () -> Unit = {},
     /** 自定义背景图路径（v0.12.0），null = 用主题色。与会话列表共享同一个设置。 */
     backgroundPath: String? = null,
     /** 提交对外部提问的回答（v0.13.0）。 */
@@ -217,6 +218,9 @@ fun ChatScreen(
      */
     var locked by remember(state.sessionId) { mutableStateOf(true) }
 
+    /** 诊断浮层开关（v0.19.1）。从设置读，改动后需重进页面生效。 */
+    val diagnosticsEnabled = remember { cd.ptrel.dshpostapi.AppPrefs.isDiagnosticsEnabled(context) }
+
     // ① 用户意图：手指往上拖 → 解锁；拖回底部 → 重新锁定。
     //
     // ⚠️ v0.18.1：这一版是**第三版**，前两版都错在同一个地方 ——
@@ -303,7 +307,7 @@ fun ChatScreen(
                 // onMenu 在这里等价于「返回会话列表」：DSH 没有抽屉，
                 // 会话列表就是上一级。图标沿用它原来的 Menu（☰），语义也对得上。
                 onMenu = onBack,
-                onNewChat = onNewChat,
+                onSettings = onSettings,
             )
         },
     ) { padding ->
@@ -485,6 +489,37 @@ fun ChatScreen(
             //
             // 位置在输入栏正上方：那是视线自然停留的地方（用户刚打完字），
             // 也避免与输入栏的发送键重叠。
+
+            // ── v0.19.1：诊断浮层 ────────────────────────────────
+            //
+            // 只在设置里开启时显示。内容刻意只有四行 ——
+            // 排查同步问题时需要的是「帧数 / 丢弃数 / 连接状态 / 当前 id」，
+            // 更多数字反而看不过来。
+            if (diagnosticsEnabled) {
+                Column(
+                    modifier = Modifier
+                        .align(androidx.compose.ui.Alignment.TopStart)
+                        .padding(start = 12.dp, top = 64.dp)
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                        .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.65f))
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                ) {
+                    val diagText = listOf(
+                        "文本帧 " + state.diagTextFrames,
+                        "丢弃 " + state.diagDroppedFrames,
+                        "watch " + (if (state.diagWatchConnected) "已连" else "断开"),
+                        "busy " + state.busy,
+                    )
+                    diagText.forEach {
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = androidx.compose.ui.graphics.Color.White,
+                        )
+                    }
+                }
+            }
+
             if (!isAtBottom) {
                 Row(
                     modifier = Modifier

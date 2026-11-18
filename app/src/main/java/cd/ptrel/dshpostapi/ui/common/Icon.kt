@@ -1114,6 +1114,27 @@ object AppIcons {
         }
     }
 
+
+    /**
+     * 更多 / 设置（三个竖点）。
+     *
+     * v0.19.1：替换聊天页顶栏原来的「新建对话」。
+     * 用竖三点而不是齿轮：左侧 `Menu`（☰）已经是「历史」，
+     * 右侧再来一个列表形状会两边混淆；竖三点是移动端标准的「次级入口」符号。
+     */
+    val MenuDots: ImageVector by lazy {
+        vector("MenuDots") {
+            stroke {
+                moveTo(12f, 6f)
+                verticalLineTo(6.01f)
+                moveTo(12f, 12f)
+                verticalLineTo(12.01f)
+                moveTo(12f, 18f)
+                verticalLineTo(18.01f)
+            }
+        }
+    }
+
     /**
      * 预设 / 提示词库 —— [MessageSquare] 的语义别名。
      *

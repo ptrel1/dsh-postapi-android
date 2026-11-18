@@ -95,11 +95,15 @@ class ComposeChatActivity : ComponentActivity() {
                         // 与会话列表共享同一个背景设置（v0.12.0）。
                         backgroundPath = cd.ptrel.dshpostapi.AppPrefs.getBackgroundPath(this@ComposeChatActivity),
                         onBack = { finish() },
-                        onNewChat = {
-                            // 新建会话：复用同一个 Activity，换掉 sessionId 后重建。
-                            // 不 finish 再 start 是因为那样会闪一下白屏；
-                            // 这里直接重建，栈里不会堆出两个聊天页。
-                            recreateWithNewSession()
+                        // v0.19.1：右侧按钮改成「设置」。
+                        // 新建会话只在首页做 —— 那里才是「开始一段新对话」的语境。
+                        onSettings = {
+                            startActivity(
+                                android.content.Intent(
+                                    this@ComposeChatActivity,
+                                    SettingsActivity::class.java,
+                                ),
+                            )
                         },
                         // v0.13.0：外部提问的回答提交。
                         onAnswerQuestion = { callId, answers -> vm.answerQuestion(callId, answers) },

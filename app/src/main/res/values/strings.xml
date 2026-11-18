@@ -561,6 +561,7 @@
     <string name="attach_viewer_multi">　（本条共 %1$d 张，此处只放大第一张）</string>
     <string name="topbar_history">历史对话</string>
     <string name="topbar_new_chat">新建对话</string>
+    <string name="topbar_settings">设置</string>
     <string name="empty_greeting">一起对话，开始创作吧</string>
     <string name="hist_empty">暂无会话</string>
     <string name="hist_selected_count">已选择 %1$d 项</string>

@@ -29,7 +29,14 @@ import cd.ptrel.dshpostapi.ui.common.AppIcons
 fun ChatTopBar(
     title: String,
     onMenu: () -> Unit,
-    onNewChat: () -> Unit,
+    /**
+     * 右侧按钮：打开设置（v0.19.1）。
+     *
+     * 早先是「新建对话」。用户指出：「新建会话不是常用操作，只能在首页新建就行了」。
+     * 而且会话里点「新建」语义含糊（另起一个？还是当前这个？），
+     * 而设置是**随时可能想改**的（背景、玻璃、诊断），才该占这个位置。
+     */
+    onSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // v0.17.0：顶栏变成玻璃表面。
@@ -83,7 +90,7 @@ fun ChatTopBar(
         )
         // 与长按菜单的「从这里新建对话」同一个图标 —— 同一个动作，同一个符号。
         // 圆圈加号留给输入栏的附件按钮（⊕ 加图片/文件），两者别混用。
-        TopBarAction(AppIcons.MessageSquarePlus, stringResource(R.string.topbar_new_chat), onNewChat)
+        TopBarAction(AppIcons.MenuDots, stringResource(R.string.topbar_settings), onSettings)
     }
     }  // GlassSurface
 }

@@ -241,6 +241,35 @@ object AppPrefs {
     const val GLASS_HIGH = "high"
     const val GLASS_MEDIUM = "medium"
     const val GLASS_OFF = "off"
+
+    // ── 诊断模式（v0.19.1）─────────────────────────────────────
+    //
+    // 开启后聊天页显示流式帧统计浮层（watch 连接状态、帧计数、丢弃数、
+    // 当前 clientId / externalId）。
+    //
+    // 为什么做成**用户可开**而不是常驻或隐藏手势：
+    //   · 常驻会干扰正常使用（浮层挡内容）
+    //   · 隐藏手势（连点 5 次之类）用户根本不知道存在
+    //   · 排查流式同步问题时（多端重复/漏字/不同步），这些数字是唯一的判据
+    const val KEY_DIAGNOSTICS = "diagnostics_enabled"
+
+    fun isDiagnosticsEnabled(context: Context): Boolean {
+        return try {
+            open(context)?.getBoolean(KEY_DIAGNOSTICS, false) ?: false
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun setDiagnosticsEnabled(context: Context, enabled: Boolean): Boolean {
+        return try {
+            open(context)?.edit()?.putBoolean(KEY_DIAGNOSTICS, enabled)?.commit() ?: false
+        } catch (e: Exception) {
+            Log.w(TAG, "write diagnostics failed (" + e.javaClass.simpleName + ")")
+            false
+        }
+    }
+
     fun getLastSessionId(context: Context): String? {
         return try {
             val prefs = open(context) ?: return null
