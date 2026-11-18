@@ -245,7 +245,32 @@ class ChatScreenViewModel(
                                 //
                                 // 早先看 busy：本端在跑时把别端内容也丢了，
                                 // 表现为「两台 App 同时发消息，流式接收不同步」（用户反馈）。
-                                if (frame.clientId != clientId) {
+                                // v0.19.0：诊断日志 —— 重复渲染问题需要看清每一帧的归属。
+                                android.util.Log.i(
+                                    "WatchDiag",
+                                    "text frame: clientId=" + frame.clientId +
+                                        " self=" + clientId +
+                                        " watchedTurn=" + watchedTurn +
+                                        " curExt=" + currentExternalId +
+                                        " drop=" + (frame.clientId == clientId) + " busy=" + _state.value.busy,
+                                )
+                                // v0.19.0：兜底 —— clientId 为空时按 busy 判断。
+                                //
+                                // ## 为什么需要这层兜底
+                                //
+                                // 服务端只在 /chat/stream 入口记下发起方（sessionOriginClient），
+                                // 而工具调用、子代理等路径产生的文本没有这个上下文，
+                                // 推送时 clientId 是空串。
+                                //
+                                // 空串不等于本端，于是被当成「别端内容」追加 → 同一段
+                                // 内容在 replyId 与 external-N 里各出现一次 → 界面重复。
+                                //
+                                // 兜底规则：clientId 为空 **且本端正在跑** 时直接丢弃。
+                                // 代价是「本端跑着时别端用不记 clientId 的路径发来的内容」会丢，
+                                // 但那种情况本来就极少，且下次 reload 会补上。
+                                val dropAsEcho = frame.clientId == clientId ||
+                                    (frame.clientId.isEmpty() && _state.value.busy)
+                                if (!dropAsEcho) {
                                     appendExternal(frame.text)
                                 }
                             }
