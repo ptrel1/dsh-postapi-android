@@ -95,9 +95,27 @@ val SimpleChatTypography = Typography(
 fun markdownBodyStyle(cjk: Boolean): TextStyle =
     if (cjk) MarkdownBodyCjkStyle else MarkdownBodyWesternStyle
 
+/**
+ * 正文的文字阴影（v0.20.0）。
+ *
+ * 壁纸直接垫在文字下时，对比度取决于底下恰好是什么图案 ——
+ * 用户截图里「这就是乙方该有的姿态」压在玫瑰花上，「姿态」两字几乎看不清。
+ *
+ * 用阴影而不是加深背景：提高背景不透明度会牺牲壁纸，
+ * 阴影只影响文字自身，两边都保住。
+ * 0.35 alpha / 1px 偏移 / 3px 模糊是实测能压住浅色干扰、又不让字发糊的量。
+ */
+private fun TextStyle.withReadableShadow(): TextStyle = copy(
+    shadow = androidx.compose.ui.graphics.Shadow(
+        color = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.35f),
+        offset = androidx.compose.ui.geometry.Offset(0f, 1f),
+        blurRadius = 3f,
+    ),
+)
+
 /** 中文档正文：两端对齐。 */
 private val MarkdownBodyCjkStyle: TextStyle =
-    SimpleChatTypography.bodyLarge.copy(textAlign = TextAlign.Justify)
+    SimpleChatTypography.bodyLarge.copy(textAlign = TextAlign.Justify).withReadableShadow()
 
 /** 西文档正文：左对齐、行高紧一档、断行走 HighQuality（长单词落点更准，仍不开连字符）。 */
 private val MarkdownBodyWesternStyle: TextStyle =

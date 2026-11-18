@@ -66,7 +66,35 @@ class ComposeChatActivity : ComponentActivity() {
             ?: if (explicitNew) null else cd.ptrel.dshpostapi.AppPrefs.getLastSessionId(this)
         val streamClient = DshStreamClient(okHttpOf(api))
 
+        // v0.20.0：设置弹层里的「背景图」。
+        val pickBackground = registerForActivityResult(
+            androidx.activity.result.contract.ActivityResultContracts.GetContent(),
+        ) { uri ->
+            if (uri == null) return@registerForActivityResult
+            java.util.concurrent.Executors.newSingleThreadExecutor().execute {
+                val saved = saveBackgroundImage(applicationContext, uri)
+                runOnUiThread {
+                    if (saved != null) {
+                        // 重建当前页让新背景生效（BackgroudPath 在 setContent 里读取）。
+                        recreate()
+                    } else {
+                        android.widget.Toast.makeText(
+                            this@ComposeChatActivity,
+                            "背景图保存失败",
+                            android.widget.Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                }
+            }
+        }
+
         setContent {
+            // getValue/setValue 来自 runtime 的委托扩展，必须显式 import（或在同一包内可见）
+            val logoutState = androidx.compose.runtime.remember {
+                androidx.compose.runtime.mutableStateOf(false)
+            }
+            var showLogoutConfirm = logoutState.value
+            val setShowLogoutConfirm: (Boolean) -> Unit = { logoutState.value = it }
             // v0.10.1：改用移植来的 SimpleChatTheme（默认 ThemeMode.SYSTEM = 跟随系统）。
             // 早先是裸 MaterialTheme{} —— 它不带 colorScheme，等于永远用浅色默认值，
             // 因此系统开深色时界面仍是白底。这是个很容易漏的点：
@@ -88,6 +116,29 @@ class ComposeChatActivity : ComponentActivity() {
                 }
                 // 会把 ChatScreen 里的 AppBackground 整个盖住（实测：
                 // 会话列表有背景、聊天页没有，就是这个原因）。
+                // v0.20.0：退出登录确认。与列表页同一套文案与危险色。
+                if (showLogoutConfirm) {
+                    cd.ptrel.dshpostapi.ui.common.AppConfirmDialog(
+                        title = cd.ptrel.dshpostapi.data.Res.get(cd.ptrel.dshpostapi.R.string.compat_menu_logout),
+                        message = cd.ptrel.dshpostapi.data.Res.get(cd.ptrel.dshpostapi.R.string.compat_menu_logout_confirm),
+                        confirmText = cd.ptrel.dshpostapi.data.Res.get(cd.ptrel.dshpostapi.R.string.compat_menu_logout),
+                        destructive = true,
+                        onDismiss = { setShowLogoutConfirm(false) },
+                        onConfirm = {
+                            setShowLogoutConfirm(false)
+                            // 清 cookie 但保留账号密码（与列表页行为一致）
+                            cd.ptrel.dshpostapi.AccountStore.clearSession(this@ComposeChatActivity)
+                            finish()
+                            startActivity(
+                                android.content.Intent(
+                                    this@ComposeChatActivity,
+                                    cd.ptrel.dshpostapi.LoginActivity::class.java,
+                                ).putExtra("auto_login", false),
+                            )
+                        },
+                    )
+                }
+
                 Scaffold(containerColor = androidx.compose.ui.graphics.Color.Transparent) { padding ->
                     ChatScreen(
                         viewModel = vm,
@@ -95,6 +146,22 @@ class ComposeChatActivity : ComponentActivity() {
                         // 与会话列表共享同一个背景设置（v0.12.0）。
                         backgroundPath = cd.ptrel.dshpostapi.AppPrefs.getBackgroundPath(this@ComposeChatActivity),
                         onBack = { finish() },
+
+                        // v0.20.0：设置弹层里的外观/账号入口。
+                        // 之前这些只在会话列表的 ⋮ 菜单里，聊天时想改背景得先返回首页。
+                        onPickBackground = { pickBackground.launch("image/*") },
+                        onCheckUpdate = { cd.ptrel.dshpostapi.Updates.checkManually(this@ComposeChatActivity) },
+                        onSwitchMode = {
+                            // 与列表页一致：切到全量模式后需要重新走一遍入口
+                            finish()
+                            startActivity(
+                                android.content.Intent(
+                                    this@ComposeChatActivity,
+                                    ComposeSessionsActivity::class.java,
+                                ),
+                            )
+                        },
+                        onLogout = { setShowLogoutConfirm(true) },
 
                         // v0.13.0：外部提问的回答提交。
                         onAnswerQuestion = { callId, answers -> vm.answerQuestion(callId, answers) },

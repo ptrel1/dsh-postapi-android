@@ -270,6 +270,35 @@ object AppPrefs {
         }
     }
 
+
+    // ── 背景遮罩强度（v0.20.0）─────────────────────────────────
+    //
+    // 壁纸直接垫在文字下时，对比度取决于底下恰好是什么图案。
+    // 用户反馈过「顶栏标题压在书架上读不出来」，也反馈过「文字压在玫瑰花上看不清」。
+    //
+    // 遮罩强度做成可调：默认 0.55（浅色） / 0.72（深色），
+    // 用户觉得文字不够清楚可以调高，觉得壁纸被压暗了可以调低。
+    // 存 0~1 的浮点，负值表示「未设置」（用主题默认）。
+    const val KEY_SCRIM_ALPHA = "scrim_alpha"
+
+    /** 读遮罩强度；未设置返回 -1（调用方用主题默认值）。 */
+    fun getScrimAlpha(context: Context): Float {
+        return try {
+            open(context)?.getFloat(KEY_SCRIM_ALPHA, -1f) ?: -1f
+        } catch (e: Exception) {
+            -1f
+        }
+    }
+
+    fun setScrimAlpha(context: Context, alpha: Float): Boolean {
+        return try {
+            open(context)?.edit()?.putFloat(KEY_SCRIM_ALPHA, alpha)?.commit() ?: false
+        } catch (e: Exception) {
+            Log.w(TAG, "write scrim failed (" + e.javaClass.simpleName + ")")
+            false
+        }
+    }
+
     fun getLastSessionId(context: Context): String? {
         return try {
             val prefs = open(context) ?: return null

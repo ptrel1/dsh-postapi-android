@@ -223,7 +223,12 @@ private fun MarkdownBlockView(text: String, modifier: Modifier) {
             codeBackground = colors.fieldBackground,
             inlineCodeBackground = colors.fieldBackground,
             dividerColor = colors.divider,
-            tableBackground = colors.card,
+            // v0.20.0：表格底色半透明。
+            //
+            // 原本是不透明的 colors.card，叠在壁纸上像一块贴上去的深色板子 ——
+            // 与周围的玻璃表面、渐变顶栏完全不是一套语言。
+            // 0.72 是实测能压住单元格文字、又能透出背景纹理的量。
+            tableBackground = colors.card.copy(alpha = 0.72f),
         ),
         /*
          * ⚠️ **不能置 0。**

@@ -7,6 +7,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Row
 import cd.ptrel.dshpostapi.ui.common.AppIcons
 import cd.ptrel.dshpostapi.AppPrefs
@@ -113,11 +115,25 @@ fun SettingsSheet(
     onDismiss: () -> Unit,
     /** 上传诊断日志（v0.19.5）。由调用方负责拿 api 与会话 id。 */
     onUploadLog: (suspend () -> String)? = null,
+    /** 选背景图（v0.20.0）。会话列表的 ⋮ 菜单里搬过来。 */
+    onPickBackground: (() -> Unit)? = null,
+    /** 检查更新。 */
+    onCheckUpdate: (() -> Unit)? = null,
+    /** 切换使用方式（兼容 / 全量）。 */
+    onSwitchMode: (() -> Unit)? = null,
+    /** 退出登录（危险操作，单独分组）。 */
+    onLogout: (() -> Unit)? = null,
 ) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val colors = LocalChatColors.current
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     var diagnostics by remember { mutableStateOf(AppPrefs.isDiagnosticsEnabled(ctx)) }
+    // v0.20.0：遮罩强度。默认取主题值（浅 0.55 / 深 0.72），
+    // 用户调过就用存的。
+    var scrim by remember {
+        val saved = AppPrefs.getScrimAlpha(ctx)
+        mutableStateOf(if (saved < 0f) 0.55f else saved)
+    }
 
     // 用 AlertDialog 而不是 ModalBottomSheet：
     // 后者在 Compose 里需要额外依赖，且与当前页的 edge-to-edge 配合要额外调。
@@ -139,6 +155,49 @@ fun SettingsSheet(
             Column(
                 modifier = Modifier.fillMaxWidth(),
             ) {
+                // v0.20.0：从会话列表的 ⋮ 菜单搬过来。
+                //
+                // 之前这些只在那一个菜单里，聊天时想改背景得先返回首页再点两下。
+                // 搬到这里之后，「设置」在哪个页面都触手可及。
+                if (onPickBackground != null) {
+                    SettingsActionRow(
+                        title = "背景图",
+                        subtitle = "选择一张图片作为聊天页与会话列表的背景",
+                        onClick = { onPickBackground() },
+                    )
+                }
+
+                // v0.20.0：遮罩强度。
+                //
+                // 壁纸直接垫在文字下时，对比度取决于底下恰好是什么图案。
+                // 用户既反馈过「标题压在书架上读不出来」，也反馈过「太厚变成实心块」。
+                // 做成滑杆比定死一个值更合理 —— 每个人的壁纸不一样。
+                SettingsSliderRow(
+                    title = "背景遮罩",
+                    subtitle = if (scrim < 0.45f) "较淡 · 壁纸清晰但文字对比弱"
+                    else if (scrim > 0.75f) "较浓 · 文字清晰但壁纸偏暗"
+                    else "适中",
+                    value = scrim,
+                    onValueChange = {
+                        scrim = it
+                        AppPrefs.setScrimAlpha(ctx, it)
+                    },
+                )
+                if (onSwitchMode != null) {
+                    SettingsActionRow(
+                        title = "切换使用方式",
+                        subtitle = "兼容模式 / 全量模式",
+                        onClick = { onSwitchMode() },
+                    )
+                }
+                if (onCheckUpdate != null) {
+                    SettingsActionRow(
+                        title = "检查更新",
+                        subtitle = "当前版本 " + cd.ptrel.dshpostapi.BuildConfig.VERSION_NAME,
+                        onClick = { onCheckUpdate() },
+                    )
+                }
+
                 SettingsToggleRow(
                     title = "诊断模式",
                     subtitle = "聊天页显示流式帧统计，用于排查同步问题",
@@ -171,9 +230,61 @@ fun SettingsSheet(
                         },
                     )
                 }
+
+                // 退出登录：单独放在最后并标红 —— 不可逆操作不该混在普通设置里。
+                if (onLogout != null) {
+                    Spacer(Modifier.height(8.dp))
+                    SettingsActionRow(
+                        title = "退出登录",
+                        subtitle = "退出后需要重新输入账号密码",
+                        danger = true,
+                        onClick = { onLogout() },
+                    )
+                }
             }
         },
     )
+}
+
+/**
+ * 一行带滑杆的设置项（v0.20.0）。
+ *
+ * 用于「连续可调」的量（遮罩强度）。离散选项该用 SegmentedSwitch，
+ * 开关该用 SettingsToggleRow —— 三种控件对应三种语义，不要混用。
+ */
+@Composable
+private fun SettingsSliderRow(
+    title: String,
+    subtitle: String? = null,
+    value: Float,
+    onValueChange: (Float) -> Unit,
+) {
+    val colors = LocalChatColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        if (subtitle != null) {
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.placeholder,
+            )
+        }
+        androidx.compose.material3.Slider(
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = 0.2f..0.95f,
+            // 分段：太少调不准，太多拖动感变碎。0.05 一档共 16 档，够用且顺滑。
+            steps = 14,
+        )
+    }
 }
 
 /** 一行可点击的设置项（v0.19.5）。
@@ -185,6 +296,7 @@ fun SettingsSheet(
 private fun SettingsActionRow(
     title: String,
     subtitle: String? = null,
+    danger: Boolean = false,
     onClick: () -> Unit,
 ) {
     val colors = LocalChatColors.current
@@ -199,7 +311,7 @@ private fun SettingsActionRow(
             Text(
                 text = title,
                 style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.primary,
+                color = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
             )
             if (subtitle != null) {
                 Text(
@@ -258,6 +370,14 @@ fun ChatScreen(
     title: String = "",
     /** 左上返回：回会话列表。 */
     onBack: () -> Unit = {},
+    /** 选背景图（v0.20.0）。设置弹层里用；null = 不显示该项。 */
+    onPickBackground: (() -> Unit)? = null,
+    /** 检查更新。 */
+    onCheckUpdate: (() -> Unit)? = null,
+    /** 切换使用方式。 */
+    onSwitchMode: (() -> Unit)? = null,
+    /** 退出登录。 */
+    onLogout: (() -> Unit)? = null,
     /** 右上新建会话。 */
 
     /** 自定义背景图路径（v0.12.0），null = 用主题色。与会话列表共享同一个设置。 */
@@ -675,6 +795,10 @@ fun ChatScreen(
                             (r as cd.ptrel.dshpostapi.CompatApi.Result.Err).reason
                         }
                     },
+                    onPickBackground = onPickBackground,
+                    onCheckUpdate = onCheckUpdate,
+                    onSwitchMode = onSwitchMode,
+                    onLogout = onLogout,
                 )
             }
 

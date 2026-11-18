@@ -44,6 +44,15 @@ fun AppBackground(
     content: @Composable () -> Unit,
 ) {
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    // v0.20.0：遮罩强度可调。未设置（<0）时用主题默认 ——
+    // 深色主题更重（浅色文字需要更暗的底），这与原本的行为一致。
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val userScrim = remember { cd.ptrel.dshpostapi.AppPrefs.getScrimAlpha(ctx) }
+    val scrimAlpha = if (userScrim < 0f) {
+        if (dark) SCRIM_ALPHA_DARK else SCRIM_ALPHA_LIGHT
+    } else {
+        userScrim
+    }
     // ⚠️ 缓存键必须包含**文件修改时间**（v0.13.1 修复）。
     //
     // 用户第二次换背景时主页不更新 —— 因为 saveBackground 写的是**同一个路径**
@@ -100,7 +109,7 @@ fun AppBackground(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(
-                        Color.Black.copy(alpha = if (dark) SCRIM_ALPHA_DARK else SCRIM_ALPHA_LIGHT),
+                        Color.Black.copy(alpha = scrimAlpha),
                     ),
             )
         }
