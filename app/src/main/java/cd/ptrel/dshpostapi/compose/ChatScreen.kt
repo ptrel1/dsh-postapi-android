@@ -53,6 +53,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -392,6 +393,49 @@ fun ChatScreen(
 
     /** 输入栏实测高度（px→dp）。用于给消息列表留底部空间 —— 见 contentPadding。 */
     var inputBarHeight by remember { mutableStateOf(0.dp) }
+
+    /** 输入栏在屏幕中的绝对矩形 [left, top, width, height]（v0.21.0）。亚克力背景按它裁壁纸。 */
+    var inputBarRect by remember { mutableStateOf(intArrayOf()) }
+
+    /**
+     * 亚克力背景（v0.21.0）。
+     *
+     * 由 AcrylicBackdrop 生成：把壁纸在输入栏位置的那块裁出来、降采样、模糊。
+     *
+     * ## 为什么用 remember 的 key 而不是每次重组都算
+     *
+     * AcrylicBackdrop 内部有缓存（按壁纸指纹 + 区域做键），这里的 remember
+     * 只是避免「区域没变也要走一遍函数调用」。真正决定重算的是那三个 key。
+     *
+     * ## 为什么在 produceState 里算
+     *
+     * 解码 + 模糊是几十毫秒级的 CPU 工作，放主线程会掉帧。
+     */
+    val acrylicDensity = androidx.compose.ui.platform.LocalDensity.current
+    val acrylicContext = LocalContext.current
+    val acrylicImage by androidx.compose.runtime.produceState<androidx.compose.ui.graphics.ImageBitmap?>(
+        initialValue = null,
+        backgroundPath, inputBarRect.contentHashCode(), acrylicDensity.density,
+    ) {
+        val rect = inputBarRect
+        if (rect.size < 4 || backgroundPath.isNullOrBlank()) {
+            value = null
+        } else {
+            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                val screen = acrylicContext.resources.displayMetrics
+                cd.ptrel.dshpostapi.ui.common.AcrylicBackdrop.build(
+                    path = backgroundPath,
+                    left = rect[0],
+                    top = rect[1],
+                    width = rect[2],
+                    height = rect[3],
+                    screenW = screen.widthPixels,
+                    screenH = screen.heightPixels,
+                    blurRadius = (18 * acrylicDensity.density).toInt(),
+                )
+            }
+        }
+    }
     val density = androidx.compose.ui.platform.LocalDensity.current
 
     // ---- 待发送图片（v0.11.0）----
@@ -729,7 +773,15 @@ fun ChatScreen(
                         if (kotlin.math.abs((h - inputBarHeight).value) > 1f) {
                             inputBarHeight = h
                         }
+                        // v0.21.0：同时记下**屏幕绝对坐标**，亚克力背景要按它裁壁纸。
+                        val pos = coords.positionInRoot()
+                        val newRect = intArrayOf(
+                            pos.x.toInt(), pos.y.toInt(),
+                            coords.size.width, coords.size.height,
+                        )
+                        if (!newRect.contentEquals(inputBarRect)) inputBarRect = newRect
                     },
+                acrylic = acrylicImage,
                 text = input,
                 onTextChange = { input = it },
                 // DSH 侧没有「思考档位」开关（模型由服务端决定）。

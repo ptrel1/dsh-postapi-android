@@ -26,6 +26,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -149,6 +151,13 @@ fun InputBar(
      * 图片本来就要以 base64 发给服务端，不必为了预览再存一份文件。
      */
     pendingImages: List<Pair<String, String>> = emptyList(),
+    /**
+     * 亚克力背景（v0.21.0）。null = 不用模糊，退回渐变+半透明。
+     *
+     * 由 ChatScreen 用 AcrylicBackdrop.build() 生成：把壁纸在输入栏位置的那块
+     * 裁出来、降采样、模糊。因为输入栏位置固定，这张图**只在壁纸或尺寸变化时重算**。
+     */
+    acrylic: androidx.compose.ui.graphics.ImageBitmap? = null,
     /** 点缩略图右上角的 ✕ 移除这张。 */
     onRemovePendingImage: (Int) -> Unit = {},
     onTextFieldFocused: () -> Unit = {},
@@ -274,6 +283,14 @@ fun InputBar(
                 // 方向遵循全局光照（光从上方来）：顶部略浅、底部略深，
                 // 与已有的 1px 顶边高光形成一致的光照声明。
                 // 幅度刻意压得很小（±6% 亮度），多了就会变成「塑料感」。
+                // v0.21.0：三档底色。
+                //
+                //   OFF      → 纯色（用户明确要省电）
+                //   有亚克力  → 模糊的壁纸局部 + 色罩（真正的 Acrylic：模糊+色调）
+                //   无亚克力  → 垂直渐变（壁纸没设 / 生成失败时的降级）
+                //
+                // 亚克力图由上层传入，尺寸与输入栏一致 —— 它已经按屏幕坐标裁好了，
+                // 这里直接 fillMaxSize 铺满即可。
                 .background(
                     if (glassQuality == cd.ptrel.dshpostapi.ui.common.GlassQuality.OFF) {
                         androidx.compose.ui.graphics.SolidColor(glassTint)
@@ -311,6 +328,26 @@ fun InputBar(
                 // 与 ChatScreen 的 bottom padding 一起构成视觉等距。
                 .padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
+            // ── 亚克力底层（v0.21.0）───────────────────────
+            //
+            // 画在最前面、后面所有内容之上有各自的底 ——
+            // 这一层只负责「让壁纸以模糊的形式透出来」。
+            //
+            // 用 Box fillMaxSize 而不是 Modifier.background(ImageBitmap)：
+            // background 不支持位图缩放策略，fillMaxSize 的 Image 才能让
+            // 这张（可能是不同像素尺寸的）图正好铺满输入栏。
+            if (acrylic != null) {
+                androidx.compose.foundation.Image(
+                    bitmap = acrylic,
+                    contentDescription = null,
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .fillMaxHeight()
+                        .alpha(0.85f),
+                )
+            }
+
             // ── 已选图片缩略图（v0.13.2）───────────────────
             //
             // 之前完全没有预览，用户选完图看不到任何变化，以为没选上。
