@@ -111,9 +111,12 @@ import cd.ptrel.dshpostapi.ui.chat.UiMessage
 @Composable
 fun SettingsSheet(
     onDismiss: () -> Unit,
+    /** 上传诊断日志（v0.19.5）。由调用方负责拿 api 与会话 id。 */
+    onUploadLog: (suspend () -> String)? = null,
 ) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val colors = LocalChatColors.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     var diagnostics by remember { mutableStateOf(AppPrefs.isDiagnosticsEnabled(ctx)) }
 
     // 用 AlertDialog 而不是 ModalBottomSheet：
@@ -145,9 +148,68 @@ fun SettingsSheet(
                         AppPrefs.setDiagnosticsEnabled(ctx, it)
                     },
                 )
+
+                // v0.19.5：上传诊断日志。
+                //
+                // 真机上没法 adb logcat，这个按钮把最近约 1000 条**元数据**
+                //（帧类型 / clientId / 判定结果 / 时间戳，不含对话正文）
+                // 传到服务端落盘，排查时直接读文件。
+                if (diagnostics && onUploadLog != null) {
+                    var uploading by remember { mutableStateOf(false) }
+                    var uploadResult by remember { mutableStateOf<String?>(null) }
+                    SettingsActionRow(
+                        title = if (uploading) "上传中…" else "上传诊断日志",
+                        subtitle = uploadResult
+                            ?: ("已记录 " + DiagLog.size() + " 条（仅元数据，不含对话内容）"),
+                        onClick = {
+                            if (uploading) return@SettingsActionRow
+                            uploading = true
+                            scope.launch {
+                                uploadResult = onUploadLog()
+                                uploading = false
+                            }
+                        },
+                    )
+                }
             }
         },
     )
+}
+
+/** 一行可点击的设置项（v0.19.5）。
+ *
+ * 与 [SettingsToggleRow] 的区别：这个整行可点、右侧没有开关，
+ * 用于「点了就执行一次动作」的项（上传日志、检查更新之类）。
+ */
+@Composable
+private fun SettingsActionRow(
+    title: String,
+    subtitle: String? = null,
+    onClick: () -> Unit,
+) {
+    val colors = LocalChatColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            if (subtitle != null) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.placeholder,
+                )
+            }
+        }
+    }
 }
 
 /** 一行带开关的设置项。 */
@@ -595,7 +657,25 @@ fun ChatScreen(
 
             // ── v0.19.2：设置卡片 ────────────────────────────────
             if (showSettings) {
-                SettingsSheet(onDismiss = { showSettings = false })
+                SettingsSheet(
+                    onDismiss = { showSettings = false },
+                    onUploadLog = {
+                        val sid = state.sessionId ?: return@SettingsSheet "没有会话"
+                        val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            viewModel.api.uploadClientLog(
+                                sessionId = sid,
+                                clientId = viewModel.clientId,
+                                appVersion = cd.ptrel.dshpostapi.BuildConfig.VERSION_NAME,
+                                lines = DiagLog.snapshot(),
+                            )
+                        }
+                        if (r is cd.ptrel.dshpostapi.CompatApi.Result.Ok) {
+                            "已上传：" + r.value
+                        } else {
+                            (r as cd.ptrel.dshpostapi.CompatApi.Result.Err).reason
+                        }
+                    },
+                )
             }
 
             // ── v0.19.1：诊断浮层 ────────────────────────────────

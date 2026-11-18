@@ -74,7 +74,7 @@ data class NetMessage(
  * 每次更新都 copy 出新列表，是最省心的正确做法。
  */
 class ChatScreenViewModel(
-    private val api: CompatApi,
+    internal val api: CompatApi,
     private val streamClient: DshStreamClient,
     /**
      * 用于持久化「上次活跃会话」（ISSUE-01 P1）。
@@ -172,7 +172,7 @@ class ChatScreenViewModel(
      * 进程内固定即可 —— 它的用途是「区分同一会话的不同发起方」，
      * 不是身份认证。重启后换个值也无妨（那时旧连接早断了）。
      */
-    private val clientId: String = java.util.UUID.randomUUID().toString().take(8)
+    internal val clientId: String = java.util.UUID.randomUUID().toString().take(8)
     private var seq = 0L
 
     /** 生成本地 id。用自增序号而不是 UUID：可读、可测、排序天然稳定。 */
@@ -235,6 +235,7 @@ class ChatScreenViewModel(
                                 // v0.19.4：诊断标志 —— 收到 snapshot 就说明连接真的建立了。
                                 //（服务端连上后第一件事就是发 snapshot，这是可靠信号）
                                 _state.update { it.copy(diagWatchConnected = true) }
+                                DiagLog.add("watch", "connected")
                                 reload()
                             }
                             is WatchFrame.Text -> {
@@ -284,6 +285,19 @@ class ChatScreenViewModel(
                                 // 但那种情况本来就极少，且下次 reload 会补上。
                                 val dropAsEcho = frame.clientId == clientId ||
                                     (frame.clientId.isEmpty() && _state.value.busy)
+                                // v0.19.5：记一条诊断日志（**不含正文**，只有归属判定）。
+                                //
+                                // 这行是排查「重复 / 漏字 / 不同步」的关键数据：
+                                // 知道每一帧被归到「本端回声」还是「别端内容」，
+                                // 才能判断去重到底生效没有。
+                                DiagLog.add(
+                                    "text",
+                                    "clientId=" + frame.clientId +
+                                        " self=" + clientId +
+                                        " drop=" + dropAsEcho +
+                                        " busy=" + _state.value.busy +
+                                        " len=" + frame.text.length,
+                                )
                                 // v0.19.1：诊断计数 —— 排查同步问题时这是唯一判据。
                                 _state.update {
                                     it.copy(
@@ -343,6 +357,7 @@ class ChatScreenViewModel(
                 if (!isActive) break
                 // v0.19.4：走到这里说明上一轮 collect 结束（连不上或掉线）。
                 _state.update { it.copy(diagWatchConnected = false) }
+                DiagLog.add("watch", "disconnected, attempt=" + attempt)
                 attempt++
                 // v0.15.9：指数退避 + 上限，超限后停止重连。
                 //

@@ -538,6 +538,38 @@ class CompatApi(
             .build()
     }
 
+    /**
+     * 上传客户端诊断日志（v0.19.5）。
+     *
+     * 只传**元数据**（帧类型 / clientId / 判定结果 / 时间戳），不含对话正文。
+     * 服务端落到 /main/log/app/clientlog-*.txt，排查时直接读文件。
+     *
+     * @return 成功时返回文件名；失败返回错误描述
+     */
+    fun uploadClientLog(
+        sessionId: String,
+        clientId: String,
+        appVersion: String,
+        lines: List<String>,
+    ): Result<String> {
+        return try {
+            val json = JSONObject()
+                .put("sessionId", sessionId)
+                .put("clientId", clientId)
+                .put("appVersion", appVersion)
+                .put("lines", org.json.JSONArray(lines))
+            val req = Request.Builder()
+                .url(hostBaseUrl.trimEnd('/') + API_PREFIX + "/chat/client-log")
+                .header("Cookie", cookieHeader())
+                .header("User-Agent", MOBILE_UA)
+                .post(json.toString().toRequestBody(JSON_MEDIA))
+                .build()
+            exec(req) { body -> body.optString("file", "ok") }
+        } catch (e: Exception) {
+            Result.Err("上传失败：" + (e.message ?: e.javaClass.simpleName))
+        }
+    }
+
     /** 回答一个待答问题（对应服务端 POST /chat/answer）。 */
     fun answerRequest(sessionId: String, callId: String, answers: List<AnswerItem>): Request {
         val arr = org.json.JSONArray()
