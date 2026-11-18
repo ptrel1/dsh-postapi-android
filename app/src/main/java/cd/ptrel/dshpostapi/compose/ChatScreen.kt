@@ -506,10 +506,13 @@ fun ChatScreen(
                         onClick = {
                             val idx = jumpToQuestionIndex(uiMessages)
                             if (idx >= 0) {
-                                scope.launch { listState.animateScrollToItem(idx) }
-                                // 手动跳转视为用户主动离开底部 → 解锁跟随，
-                                // 否则下一帧就被程序拉回底部，按钮等于没用。
+                                // v0.18.8：**先解锁、再滚动**，都放进同一个协程。
+                                //
+                                // 这里用 animateScrollToItem 是对的 —— 我们要的正是
+                                // 「让那条用户消息对齐视口顶部」，与本轮回答从第一行开始读的意图一致。
+                                // （回到底部用的是另一个语义，见那个按钮的注释。）
                                 locked = false
+                                scope.launch { listState.animateScrollToItem(idx) }
                             }
                         },
                     )
@@ -517,8 +520,22 @@ fun ChatScreen(
                         text = Res.get(R.string.chat_scroll_bottom),
                         icon = AppIcons.ArrowDown,
                         onClick = {
-                            scope.launch { listState.animateScrollToItem(uiMessages.lastIndex) }
-                            locked = true
+                            // v0.18.8：**不能用 animateScrollToItem(lastIndex)**。
+                            //
+                            // 那个 API 是把「该 item 的**顶边**」对齐到视口顶部 ——
+                            // 最后一条如果比屏幕矮，滚完它仍在顶部，下面空一大块，
+                            // 表现为「点了没回到底部」。
+                            //
+                            // 正确做法是滚到「不能再往后滚」为止：scrollToBottom() 用一个
+                            // 超大 delta，ScrollableState 会自动夹到内容末尾。
+                            //
+                            // 顺序也有讲究：**先滚动、后上锁**。反过来的话，
+                            // 动画期间 follow 的 effect 看到 locked 已经为 true 但
+                            // 布局还没变，不会做事；等它真滚动时又可能被用户手势打断。
+                            scope.launch {
+                                listState.scrollToBottom()
+                                locked = true
+                            }
                         },
                     )
                 }
