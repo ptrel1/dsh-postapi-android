@@ -346,6 +346,19 @@ fun InputBar(
                         .fillMaxHeight()
                         .alpha(0.85f),
                 )
+                // ⚠️ 色罩必须叠在亚克力图**之上**。
+                //
+                // Column 的 background() 是最底层，Image 会盖住它 ——
+                // 不补这一层的话，`acrylic` 就是一张未加色调的模糊壁纸，
+                // 文字直接压上去，对比度全看壁纸本身。
+                //
+                // 用同一个 glassTint，保证「有壁纸」与「没壁纸」两档的色调一致。
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .fillMaxHeight()
+                        .background(glassTint),
+                )
             }
 
             // ── 已选图片缩略图（v0.13.2）───────────────────
