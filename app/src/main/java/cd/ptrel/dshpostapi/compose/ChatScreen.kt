@@ -6,8 +6,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.Row
 import cd.ptrel.dshpostapi.ui.common.AppIcons
+import cd.ptrel.dshpostapi.AppPrefs
+import cd.ptrel.dshpostapi.ui.theme.LocalChatColors
+import cd.ptrel.dshpostapi.ui.common.AppSwitch
 import cd.ptrel.dshpostapi.data.Res
 
 import androidx.compose.foundation.clickable
@@ -87,6 +91,99 @@ import cd.ptrel.dshpostapi.ui.chat.UiMessage
  * 屏上已显示的内容纹丝不动。反过来钉底边会把内容整体上顶
  * （SimpleChat 实测 0.5 秒滑走 861px，手指拦不住）。
  */
+/**
+ * 设置卡片（v0.19.2）。
+ *
+ * ## 为什么是弹层而不是独立页面
+ *
+ * 早先做成 SettingsActivity，用户指出：「有必要一个页面吗，一个卡片不就够了」。
+ * 确实 —— 当时只有一个开关，却付了「跳页 + 返回 + 切换上下文」的代价。
+ *
+ * 弹层还多一个好处：**背景就是聊天页本身**，改任何外观设置都能立刻看到效果。
+ *
+ * ## 什么时候该改成独立页
+ *
+ * 设置项超过一屏（约 8 项）时。那时弹层要滚动、要分组，
+ * 与「一个卡片」的原意就背离了。现在的项数是一屏之内的。
+ *
+ * @param onDismiss 关闭弹层
+ */
+@Composable
+fun SettingsSheet(
+    onDismiss: () -> Unit,
+) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val colors = LocalChatColors.current
+    var diagnostics by remember { mutableStateOf(AppPrefs.isDiagnosticsEnabled(ctx)) }
+
+    // 用 AlertDialog 而不是 ModalBottomSheet：
+    // 后者在 Compose 里需要额外依赖，且与当前页的 edge-to-edge 配合要额外调。
+    // AlertDialog 的居中卡片在这个场景（2~3 个开关）已经合适。
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) {
+                Text("完成")
+            }
+        },
+        title = {
+            Text(
+                text = "设置",
+                style = MaterialTheme.typography.titleMedium,
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                SettingsToggleRow(
+                    title = "诊断模式",
+                    subtitle = "聊天页显示流式帧统计，用于排查同步问题",
+                    checked = diagnostics,
+                    onCheckedChange = {
+                        diagnostics = it
+                        AppPrefs.setDiagnosticsEnabled(ctx, it)
+                    },
+                )
+            }
+        },
+    )
+}
+
+/** 一行带开关的设置项。 */
+@Composable
+private fun SettingsToggleRow(
+    title: String,
+    subtitle: String? = null,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    val colors = LocalChatColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            if (subtitle != null) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.placeholder,
+                )
+            }
+        }
+        AppSwitch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
 @Composable
 fun ChatScreen(
     viewModel: ChatScreenViewModel,
@@ -100,8 +197,7 @@ fun ChatScreen(
     /** 左上返回：回会话列表。 */
     onBack: () -> Unit = {},
     /** 右上新建会话。 */
-    /** 打开设置（v0.19.1）。顶栏右侧按钮。 */
-    onSettings: () -> Unit = {},
+
     /** 自定义背景图路径（v0.12.0），null = 用主题色。与会话列表共享同一个设置。 */
     backgroundPath: String? = null,
     /** 提交对外部提问的回答（v0.13.0）。 */
@@ -218,6 +314,13 @@ fun ChatScreen(
      */
     var locked by remember(state.sessionId) { mutableStateOf(true) }
 
+    /** 设置卡片是否展开（v0.19.2）。
+     *
+     * 从独立页面改成弹层：当时只有一个开关，却付了「跳页 + 返回 + 切换上下文」的代价。
+     * 弹层还多一个好处 —— 背景就是聊天页本身，改外观设置能立刻看到效果。
+     */
+    var showSettings by remember { mutableStateOf(false) }
+
     /** 诊断浮层开关（v0.19.1）。从设置读，改动后需重进页面生效。 */
     val diagnosticsEnabled = remember { cd.ptrel.dshpostapi.AppPrefs.isDiagnosticsEnabled(context) }
 
@@ -307,7 +410,7 @@ fun ChatScreen(
                 // onMenu 在这里等价于「返回会话列表」：DSH 没有抽屉，
                 // 会话列表就是上一级。图标沿用它原来的 Menu（☰），语义也对得上。
                 onMenu = onBack,
-                onSettings = onSettings,
+                onSettings = { showSettings = true },
             )
         },
     ) { padding ->
@@ -489,6 +592,11 @@ fun ChatScreen(
             //
             // 位置在输入栏正上方：那是视线自然停留的地方（用户刚打完字），
             // 也避免与输入栏的发送键重叠。
+
+            // ── v0.19.2：设置卡片 ────────────────────────────────
+            if (showSettings) {
+                SettingsSheet(onDismiss = { showSettings = false })
+            }
 
             // ── v0.19.1：诊断浮层 ────────────────────────────────
             //
