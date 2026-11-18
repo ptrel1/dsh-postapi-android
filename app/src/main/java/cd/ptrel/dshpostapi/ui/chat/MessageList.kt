@@ -1119,8 +1119,10 @@ private fun ExecSteps(steps: List<NetMessage.ExecStep>) {
                             )
                         }
                     }
-                    // 参数摘要：只取第一行，避免长 JSON 撑开界面
-                    val argLine = step.args.lineSequence().firstOrNull()?.take(120).orEmpty()
+                    // v0.19.6：按工具名取语义字段，而不是截断参数 JSON。
+                    // 见 toolSummary 的长注释 —— 早先对 run_code 会显示成
+                    // {"code":"const r = await tools.bash({ comm… 这种片段。
+                    val argLine = toolSummary(step.name, step.args)
                     if (argLine.isNotBlank() && argLine != "{}") {
                         Text(
                             text = argLine,
@@ -1150,4 +1152,122 @@ private fun ExecSteps(steps: List<NetMessage.ExecStep>) {
             }
         }
     }
+}
+
+/**
+ * 从工具参数里提取「一行摘要」（v0.19.6）。
+ *
+ * ## 为什么不能直接截参数 JSON
+ *
+ * 早先是 `step.args.lineSequence().firstOrNull()?.take(120)`，
+ * 对 `run_code` 来说结果是：
+ *
+ * ```
+ * {"code":"const r = await tools.bash({ command: \"cd /main/app/gith
+ * ```
+ *
+ * 用户看到的是被切断的 JSON —— 既看不懂，也没有任何信息量。
+ *
+ * ## DSH 官方的做法
+ *
+ * 按工具名取**语义字段**，只显示第一行（dsh-client-ui-tool/lib/client.js:228）：
+ *
+ * ```js
+ * const SUMMARY_KEYS = {
+ *     read:   ["path", "file_path"],
+ *     search: ["query", "pattern", "url"],
+ *     write:  ["path", "file_path"],
+ *     edit:   ["path", "file_path"],
+ *     code:   ["description"],      // ← run_code 取 description
+ *     others: []
+ * };
+ * ```
+ *
+ * 关键是 `code: ["description"]` —— run_code 的参数里有一句人写的用途说明，
+ * 那才是用户想看的，不是代码本身。
+ *
+ * ## 兜底
+ *
+ * 没有语义字段时，退到「第一个非空字符串字段的第一行」，
+ * 而不是整段 JSON —— 至少能看。
+ */
+private fun toolSummary(name: String, argsJson: String): String {
+    val obj = try {
+        org.json.JSONObject(argsJson)
+    } catch (e: Exception) {
+        // 参数不是合法 JSON（流式传输中被截断）：退到原始文本的第一行
+        return argsJson.lineSequence().firstOrNull()?.take(100).orEmpty()
+    }
+
+    // 按工具名取语义字段 —— 顺序即优先级
+    val keys = when (name) {
+        "read", "read_image", "write", "edit", "str_replace_editor" ->
+            listOf("path", "file_path", "description")
+        "grep", "glob", "web_search", "web_fetch" ->
+            listOf("query", "pattern", "url", "description")
+        // run_code / bash / pwsh —— 用户想知道「执行了什么命令」，不是代码。
+        // 实测 run_code 的参数里没有 description，只有 code，
+        // 所以要专门从代码里提取（见 runCodeSummary）。
+        "run_code", "bash", "pwsh" -> listOf("@@runcode@@")
+        "ask_user_question" -> listOf("questions", "description")
+        else -> listOf("description", "path", "query")
+    }
+
+    // run_code 特例：从 code 里提取命令
+    if (keys.firstOrNull() == "@@runcode@@") {
+        return runCodeSummary(obj.optString("code", obj.optString("command", "")))
+    }
+
+    for (k in keys) {
+        val v = obj.optString(k, "")
+        if (v.isNotBlank()) return v.lineSequence().firstOrNull()?.take(100).orEmpty()
+    }
+
+    // 兜底：第一个非空字符串字段
+    for (k in obj.keys()) {
+        val v = obj.optString(k, "")
+        if (v.isNotBlank() && !v.startsWith("{") && !v.startsWith("[")) {
+            return v.lineSequence().firstOrNull()?.take(100).orEmpty()
+        }
+    }
+    return ""
+}
+
+/**
+ * 从 `run_code` 的代码里提取「它实际上在干什么」（v0.19.7）。
+ *
+ * ## 为什么不能直接用 description
+ *
+ * 实测服务端下发的 `run_code` 参数里**只有 `code`**，没有 `description`。
+ * 所以「按工具名取语义字段」这条路在 run_code 上走不通 ——
+ * 只能从代码本身提取。
+ *
+ * ## 提取什么
+ *
+ * `run_code` 的代码绝大多数长这样：
+ *
+ * ```js
+ * const r = await tools.bash({ command: "cd /main/app && gradle build" })
+ * ```
+ *
+ * 用户想知道的是「执行了什么命令」，不是这段 JS。
+ * 所以优先捞 `command:` 后面的字符串；捞不到再退回第一行代码。
+ *
+ * ## 为什么不显示完整代码
+ *
+ * 一次 run_code 常常是十几行（含引号转义），塞进消息流会把对话撑爆。
+ * 需要看全文时，用户看的是**已完成的输出**，不是调用参数。
+ */
+private fun runCodeSummary(code: String): String {
+    // 优先级 1：command: "..." —— 覆盖 bash 工具
+    val cmd = Regex("command:\\s*\\\\?\"((?:[^\"\\\\]|\\\\.)*)")
+        .find(code)?.groupValues?.getOrNull(1)
+    if (!cmd.isNullOrBlank()) return cmd.replace("\\\\n", " ").take(120)
+
+    // 优先级 2：description 字段（有的调用会带）
+    val desc = Regex("description:\\s*\"([^\"]*)\"").find(code)?.groupValues?.getOrNull(1)
+    if (!desc.isNullOrBlank()) return desc.take(120)
+
+    // 兜底：第一行非空代码
+    return code.lineSequence().firstOrNull { it.isNotBlank() }?.trim()?.take(120).orEmpty()
 }
