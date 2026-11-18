@@ -1119,10 +1119,16 @@ private fun ExecSteps(steps: List<NetMessage.ExecStep>) {
                             )
                         }
                     }
-                    // v0.19.6：按工具名取语义字段，而不是截断参数 JSON。
-                    // 见 toolSummary 的长注释 —— 早先对 run_code 会显示成
-                    // {"code":"const r = await tools.bash({ comm… 这种片段。
-                    val argLine = toolSummary(step.name, step.args)
+                    // v0.19.7：服务端已经提取好一行摘要（summarizeToolArgs），
+                    // 客户端**直接显示**，不再自己解析。
+                    //
+                    // 为什么改成服务端做：早先下发的 args 是 `d.arguments.slice(0, 500)`，
+                    // 硬切在 JSON 中间，客户端 JSONObject() 必然失败，只能显示残片。
+                    // 在服务端解析一次，客户端就彻底不用管格式了。
+                    //
+                    // 保底：老版本服务端下发的仍是原始 JSON 时，客户端用 toolSummary 兜一层。
+                    val argLine = step.args.takeIf { it.isNotBlank() && !it.startsWith("{") }
+                        ?: toolSummary(step.name, step.args)
                     if (argLine.isNotBlank() && argLine != "{}") {
                         Text(
                             text = argLine,
