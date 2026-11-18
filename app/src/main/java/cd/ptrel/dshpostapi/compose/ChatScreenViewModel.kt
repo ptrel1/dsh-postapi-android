@@ -232,6 +232,9 @@ class ChatScreenViewModel(
                             is WatchFrame.Snapshot -> {
                                 // 连上即补拉：断线期间的内容靠这次补齐。
                                 attempt = 0
+                                // v0.19.4：诊断标志 —— 收到 snapshot 就说明连接真的建立了。
+                                //（服务端连上后第一件事就是发 snapshot，这是可靠信号）
+                                _state.update { it.copy(diagWatchConnected = true) }
                                 reload()
                             }
                             is WatchFrame.Text -> {
@@ -338,6 +341,8 @@ class ChatScreenViewModel(
                     android.util.Log.w("WatchDiag", "watch error: " + e.javaClass.simpleName + " " + e.message)
                 }
                 if (!isActive) break
+                // v0.19.4：走到这里说明上一轮 collect 结束（连不上或掉线）。
+                _state.update { it.copy(diagWatchConnected = false) }
                 attempt++
                 // v0.15.9：指数退避 + 上限，超限后停止重连。
                 //
