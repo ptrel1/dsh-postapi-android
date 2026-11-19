@@ -127,7 +127,7 @@ class DshStreamClient(
             when (o.optString("type")) {
                 "snapshot" -> WatchFrame.Snapshot
                 "text" -> o.optString("text").takeIf { it.isNotEmpty() }?.let {
-                    WatchFrame.Text(it, o.optString("clientId", ""))
+                    WatchFrame.Text(it, o.optString("clientId", ""), o.optInt("offset", -1))
                 }
                 "reasoning" -> o.optString("text").takeIf { it.isNotEmpty() }?.let {
                     WatchFrame.Reasoning(it, o.optString("clientId", ""))
@@ -318,7 +318,25 @@ sealed interface WatchFrame {
      * 客户端据此丢弃自己那轮的回声，而不是靠 busy 这种间接状态推断。
      * 空串表示服务端不知道（例如网页端直连发起的轮次）—— 那一定不是本端，照常追加。
      */
-    data class Text(val text: String, val clientId: String = "") : WatchFrame
+    /**
+     * 文本增量。
+     *
+     * @param clientId 发起方（空串 = 服务端不知道，可能是任意一端）
+     * @param offset   这段文本在本会话**全部已发文本**中的起始位置（v0.22.3）
+     *
+     * ## offset 用来做什么
+     *
+     * 同一个 delta 会被 `/chat/stream` 与 `/chat/watch` 各推一次。
+     * 客户端按 offset 幂等：`offset < 已收长度` 说明这段已经写过，跳过。
+     *
+     * 比内容匹配可靠得多 —— 日志实证 1 字符的帧（405/997）在任何长文本里
+     * 都能找到，按子串判断必然误丢。
+     */
+    data class Text(
+        val text: String,
+        val clientId: String = "",
+        val offset: Int = -1,
+    ) : WatchFrame
 
     /** 思考增量。同样带发起方 [clientId]。 */
     data class Reasoning(val text: String, val clientId: String = "") : WatchFrame
