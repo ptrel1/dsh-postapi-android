@@ -99,7 +99,36 @@ class ComposeChatActivity : ComponentActivity() {
             // 早先是裸 MaterialTheme{} —— 它不带 colorScheme，等于永远用浅色默认值，
             // 因此系统开深色时界面仍是白底。这是个很容易漏的点：
             // MaterialTheme() 无参调用是**合法**的，不报错，只是不跟随系统。
-            SimpleChatTheme {
+            // v0.22.0：壁纸与主题方向相反时，**局部反转**配色。
+            //
+            // 主题（浅/深）与壁纸（亮/暗）是两个独立维度，可能打架：
+            // 用户在深色壁纸上用浅色主题 → 正文是深灰几乎看不见，
+            // 表格底是近白色刺眼得像补丁（用户截图里的实际情况）。
+            //
+            // 读壁纸平均亮度，与主题方向比对；相反时把 ThemeMode 反过来。
+            // 只作用于聊天页 —— 列表页/设置页没有大面积文字压在壁纸上。
+            val wallpaperPath = cd.ptrel.dshpostapi.AppPrefs.getBackgroundPath(this@ComposeChatActivity)
+            val wallpaperLuma = androidx.compose.runtime.remember(wallpaperPath) {
+                cd.ptrel.dshpostapi.ui.common.WallpaperLuma.of(wallpaperPath)
+            }
+            val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
+            val flipped = cd.ptrel.dshpostapi.ui.common.WallpaperLuma.needsInversion(wallpaperLuma, systemDark)
+            android.util.Log.i(
+                "WallpaperLuma",
+                "path=" + wallpaperPath + " luma=" + wallpaperLuma +
+                    " systemDark=" + systemDark + " flipped=" + flipped,
+            )
+            SimpleChatTheme(
+                themeMode = if (!flipped) {
+                    cd.ptrel.dshpostapi.ui.theme.ThemeMode.SYSTEM
+                } else if (systemDark) {
+                    // 深色主题 + 亮壁纸 → 反过来用浅色（深色文字压在亮壁纸上才看得清）
+                    cd.ptrel.dshpostapi.ui.theme.ThemeMode.LIGHT
+                } else {
+                    // 浅色主题 + 暗壁纸 → 反过来用深色
+                    cd.ptrel.dshpostapi.ui.theme.ThemeMode.DARK
+                },
+            ) {
                 // 用 viewModel() 拿实例：它随 Activity 的 ViewModelStore 走，
                 // 转屏/进程重建时状态不丢（旧 XML 版是自己 new 的，转屏就丢消息）。
                 val vm: ChatScreenViewModel = viewModel(

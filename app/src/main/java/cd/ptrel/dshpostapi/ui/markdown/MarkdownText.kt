@@ -228,7 +228,39 @@ private fun MarkdownBlockView(text: String, modifier: Modifier) {
             // 原本是不透明的 colors.card，叠在壁纸上像一块贴上去的深色板子 ——
             // 与周围的玻璃表面、渐变顶栏完全不是一套语言。
             // 0.72 是实测能压住单元格文字、又能透出背景纹理的量。
-            tableBackground = colors.card.copy(alpha = 0.72f),
+            // v0.21.4：表格底色改用**中性深色**，不跟随主题的 card。
+            //
+            // 0.72 alpha 的 CardDark 叠在深红壁纸上时，会被壁纸的色相洗掉 ——
+            // 用户截图里表格边界几乎看不出来，单元格混在正文里。
+            //
+            // 表格需要的是「稳定的可读面板」，色相不该跟着壁纸走。
+            // 0.88 是实测能立住边界、又不至于变成实心黑板的值。
+            // 深/浅主题用亮度判断（本文件里没有 luminance 扩展，就地算）。
+            // ⚠️ v0.21.5：判断的是「正文是不是浅色」而不是「背景深浅」。
+            //
+            // 上版用 scheme.background 的亮度判深浅，但**主题的 background 是纯色**
+            //（深色 #15181C / 浅色 #FFFFFF），而实际显示的是壁纸 ——
+            // 用户在深色主题 + 彩色壁纸下，表格被画成了纯白的大块，非常突兀。
+            //
+            // 真正要匹配的是**文字颜色**：正文是浅色（深色主题）→ 表格用深底；
+            // 正文是深色（浅色主题）→ 表格用浅底。这样表格永远与正文一套。
+            // v0.21.6：诊断 —— 表格底色到底算成了哪个分支。
+            tableBackground = run {
+                val luma = 0.299f * scheme.onBackground.red +
+                    0.587f * scheme.onBackground.green +
+                    0.114f * scheme.onBackground.blue
+                android.util.Log.i(
+                    "TableDiag",
+                    "onBackground=" + scheme.onBackground + " luma=" + luma +
+                        " -> dark=" + (luma > 0.5f),
+                )
+                if (luma > 0.5f) {
+                    androidx.compose.ui.graphics.Color(0xFF141618).copy(alpha = 0.88f)
+                } else {
+                    androidx.compose.ui.graphics.Color(0xFFF7F7F8).copy(alpha = 0.92f)
+                }
+            },
+
         ),
         /*
          * ⚠️ **不能置 0。**

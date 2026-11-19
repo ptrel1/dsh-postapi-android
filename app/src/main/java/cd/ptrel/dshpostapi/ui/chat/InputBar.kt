@@ -198,41 +198,21 @@ fun InputBar(
     // v0.17.0：玻璃底色。OFF 档时保持原样（不透明），避免「关了玻璃还是一样」的困惑。
     val glassQuality = cd.ptrel.dshpostapi.ui.common.rememberGlassQuality()
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    // v0.21.3：有亚克力图时，色罩按**壁纸该区域的实际亮度**选明暗。
+    // v0.21.4：色罩用**中性深色**，不跟随壁纸亮度，也不跟随主题色。
     //
-    // 早先按主题选（浅色主题 → 白色 card），但主题说的是「App 是深色还是浅色」，
-    // 不是「壁纸这块是深还是浅」。实测浅色主题 + 浅色壁纸时，
-    // 白色色罩叠上去等于更白，占位文字几乎看不见。
+    // 上一版按壁纸平均亮度选黑/白罩，在「深色主题 + 高饱和彩色壁纸」上翻车：
+    // 壁纸亮度低（判定为暗底）→ 白罩 22% → 白叠在模糊的红上变成**粉色**。
     //
-    // 用亚克力图的平均亮度判断：暗底配白罩（提亮+提高对比），亮底配黑罩（压暗）。
-    // 这样无论壁纸什么颜色，输入栏都有稳定的可读性。
-    // 亮度由 AcrylicBackdrop 在生成时算好（避免在这里再遍历一遍像素）。
-    val acrylicLuma = if (acrylic != null) {
-        cd.ptrel.dshpostapi.ui.common.AcrylicBackdrop.lastLuma
-    } else -1f
-
-    val glassTint = if (glassQuality == cd.ptrel.dshpostapi.ui.common.GlassQuality.OFF) {
-        colors.card
-    } else if (acrylicLuma >= 0f) {
-        // 有亚克力：按壁纸亮度决定色罩
-        if (acrylicLuma > 0.55f) {
-            // 亮底 → 黑罩，压暗提高文字对比
-            androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.38f)
-        } else {
-            // 暗底 → 白罩，提亮并让暗色文字可读
-            androidx.compose.ui.graphics.Color.White.copy(alpha = 0.22f)
-        }
-    } else if (isDark) {
-        // v0.17.3：0.86 → 0.62。
-        //
-        // 0.86 等于做成了实心块 —— 用户反馈「底部框背景不是透明的，
-        // 上滑文字应该能放在背景上」。玻璃要能透出背景才有意义。
-        //
-        // 可读性改由**输入框自身的不透明底**保证（见下方 textField 的底色），
-        // 而不是靠把整块玻璃做厚 —— 那会让它变成一堵墙。
-        colors.card.copy(alpha = 0.62f)
-    } else {
-        colors.card.copy(alpha = 0.70f)
+    // 根因：把「亮度」当成了「底色」。彩色壁纸亮度可能很低，但色相很强，
+    // 任何浅色叠加都会把色相顶出来。
+    //
+    // 统一用中性深色：让**明暗**透出来、色相被压住 ——
+    // 这才是磨砂玻璃的观感，也保证文字对比与壁纸无关。
+    val glassTint = when {
+        glassQuality == cd.ptrel.dshpostapi.ui.common.GlassQuality.OFF -> colors.card
+        acrylic != null -> androidx.compose.ui.graphics.Color(0xFF121418).copy(alpha = 0.55f)
+        isDark -> colors.card.copy(alpha = 0.62f)
+        else -> colors.card.copy(alpha = 0.70f)
     }
     val shape = ContainerShape
     val focusRequester = remember { FocusRequester() }
