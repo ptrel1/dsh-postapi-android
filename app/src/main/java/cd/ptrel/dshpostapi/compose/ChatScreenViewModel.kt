@@ -283,8 +283,23 @@ class ChatScreenViewModel(
                                 // 兜底规则：clientId 为空 **且本端正在跑** 时直接丢弃。
                                 // 代价是「本端跑着时别端用不记 clientId 的路径发来的内容」会丢，
                                 // 但那种情况本来就极少，且下次 reload 会补上。
-                                val dropAsEcho = frame.clientId == clientId ||
-                                    (frame.clientId.isEmpty() && _state.value.busy)
+                                // v0.22.2：区分「明确是本端」与「服务端不知道是谁」。
+                                //
+                                // 日志实证（2026-11-19，997 帧）：服务端在工具调用 / 子代理
+                                // 路径上推的文本 clientId 是空串，而旧兜底把它当成回声全丢弃 ——
+                                // 结果是 watch 通道全程空转，多端同步形同虚设。
+                                //
+                                // 正确区分：
+                                //   clientId == 本端   → **确定**是本端回声，丢弃（否则重复）
+                                //   clientId 为空      → 服务端不知道谁发起，可能是任意一端
+                                //                        → 接收，但要按内容去重
+                                //   clientId == 别端    → 正常接收
+                                val isOwnEcho = frame.clientId == clientId
+                                val unknownOrigin = frame.clientId.isEmpty()
+                                // 空来源的帧：如果这段文本已经在某个消息的尾部出现过，
+                                // 说明是同一条内容的第二次推送（stream 通道先写过一遍），跳过。
+                                val duplicated = unknownOrigin && tailAlreadyContains(frame.text)
+                                val dropAsEcho = isOwnEcho || duplicated
                                 // v0.19.5：记一条诊断日志（**不含正文**，只有归属判定）。
                                 //
                                 // 这行是排查「重复 / 漏字 / 不同步」的关键数据：
@@ -392,6 +407,31 @@ class ChatScreenViewModel(
      * 现在每轮用新 id（由 [externalTurnSeq] 递增），
      * 并在 TurnEnd 时把当前那条收尾。
      */
+    /**
+     * 这段文本是否已经出现在「正在流式的消息」尾部（v0.22.2）。
+     *
+     * ## 为什么需要内容去重
+     *
+     * 服务端在工具调用 / 子代理路径推的文本没有 clientId，分不清是哪一端发起的。
+     * 先前靠 `clientId.isEmpty() && busy` 一律丢弃 —— 日志实证 997 帧全丢，
+     * 代价是别端内容也全丢，多端同步形同虚设。
+     *
+     * 改为看内容：本端发送时 /chat/stream 会先写入同样的文本，
+     * watch 再推一次时，尾部的 64 字符里就能找到 —— 说明是重复。
+     *
+     * ## 为什么取 64 字符
+     *
+     * 流式 chunk 通常几个字符到几十个（日志实测 405 帧只有 1 字符）。
+     * 64 足以覆盖一帧，又不会因为标点重复而误判。
+     */
+    private fun tailAlreadyContains(text: String): Boolean {
+        if (text.isEmpty()) return true
+        val streaming = _state.value.messages.lastOrNull {
+            it.status == NetMessage.Status.Streaming
+        } ?: return false
+        return streaming.text.takeLast(64).contains(text)
+    }
+
     private fun appendExternal(text: String) {
         _state.update { st ->
             val list = st.messages
