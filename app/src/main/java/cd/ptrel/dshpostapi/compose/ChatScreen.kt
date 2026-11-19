@@ -131,6 +131,8 @@ fun SettingsSheet(
     var diagnostics by remember { mutableStateOf(AppPrefs.isDiagnosticsEnabled(ctx)) }
     // v0.20.0：遮罩强度。默认取主题值（浅 0.55 / 深 0.72），
     // 用户调过就用存的。
+    // v0.22.1：配色跟随壁纸。
+    var followWallpaper by remember { mutableStateOf(AppPrefs.isThemeFollowWallpaper(ctx)) }
     var scrim by remember {
         val saved = AppPrefs.getScrimAlpha(ctx)
         mutableStateOf(if (saved < 0f) 0.55f else saved)
@@ -182,6 +184,27 @@ fun SettingsSheet(
                     onValueChange = {
                         scrim = it
                         AppPrefs.setScrimAlpha(ctx, it)
+                    },
+                )
+
+                // v0.22.1：配色跟随壁纸。
+                //
+                // 主题（浅/深）和壁纸（亮/暗）是两个独立维度。方向相反时
+                // 正文会看不见（浅色主题 + 深色壁纸 = 深灰字压在深底上）。
+                //
+                // 开着：明暗由壁纸决定，永远看得清。
+                // 关掉：跟随系统主题 —— 留给「我就是想用浅色」的人。
+                SettingsToggleRow(
+                    title = "配色跟随壁纸",
+                    subtitle = if (followWallpaper) {
+                        "文字明暗按壁纸亮度自动调整，保证可读"
+                    } else {
+                        "跟随系统深色模式（可能看不清文字）"
+                    },
+                    checked = followWallpaper,
+                    onCheckedChange = {
+                        followWallpaper = it
+                        AppPrefs.setThemeFollowWallpaper(ctx, it)
                     },
                 )
                 if (onSwitchMode != null) {
@@ -875,8 +898,16 @@ fun ChatScreen(
                         .padding(horizontal = 8.dp, vertical = 6.dp),
                 ) {
                     val diagText = listOf(
-                        "文本帧 " + state.diagTextFrames,
-                        "丢弃 " + state.diagDroppedFrames,
+                        // v0.22.2：措辞改清楚。
+                        //
+                        // 原来显示「文本帧 1835 / 丢弃 1835」，用户问「丢失这么多是什么」。
+                        // 实际是**本端发送期间 watch 通道的镜像重复**被正确去重 ——
+                        // 内容由 /chat/stream 那条通道写入，watch 只是同一个东西的第二份。
+                        // 丢弃计数 ≈ 文本帧数不是异常，是正常现象。
+                        "收到 " + state.diagTextFrames,
+                        "去重 " + state.diagDroppedFrames +
+                            (if (state.diagTextFrames > 0 && state.diagDroppedFrames == state.diagTextFrames)
+                                "（全部为本端回声，正常）" else ""),
                         "watch " + (if (state.diagWatchConnected) "已连" else "断开"),
                         "busy " + state.busy,
                     )

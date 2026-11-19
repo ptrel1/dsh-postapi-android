@@ -271,6 +271,33 @@ object AppPrefs {
     }
 
 
+    // ── 配色跟随壁纸（v0.22.1）─────────────────────────────────
+    //
+    // 主题（浅/深）与壁纸（亮/暗）是两个独立维度。方向相反时文字看不清 ——
+    // 用户实际踩过：浅色主题 + 深红壁纸，正文深灰几乎不可见。
+    //
+    // 开启（默认）：明暗完全由壁纸亮度决定，不看系统主题。
+    // 关闭：完全跟随系统主题（用户可能有自己的偏好，必须能覆盖）。
+    const val KEY_THEME_FOLLOW_WALLPAPER = "theme_follow_wallpaper"
+
+    fun isThemeFollowWallpaper(context: Context): Boolean {
+        return try {
+            // 默认 true：新用户装了深色壁纸，不该先看到一片看不见的字。
+            open(context)?.getBoolean(KEY_THEME_FOLLOW_WALLPAPER, true) ?: true
+        } catch (e: Exception) {
+            true
+        }
+    }
+
+    fun setThemeFollowWallpaper(context: Context, on: Boolean): Boolean {
+        return try {
+            open(context)?.edit()?.putBoolean(KEY_THEME_FOLLOW_WALLPAPER, on)?.commit() ?: false
+        } catch (e: Exception) {
+            Log.w(TAG, "write follow-wallpaper failed (" + e.javaClass.simpleName + ")")
+            false
+        }
+    }
+
     // ── 背景遮罩强度（v0.20.0）─────────────────────────────────
     //
     // 壁纸直接垫在文字下时，对比度取决于底下恰好是什么图案。

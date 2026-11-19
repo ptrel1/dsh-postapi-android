@@ -87,29 +87,17 @@ object WallpaperLuma {
     }
 
     /**
-     * 该壁纸是否与主题方向**相反**（需要反转配色）。
+     * 在「配色跟随壁纸」模式下，页面该用深色还是浅色。
      *
-     * @param luma 壁纸平均亮度（[of] 的返回值）
-     * @param isDarkTheme 当前主题是否深色
-     * @return true = 深壁纸配浅主题（或反过来），正文与表格都需要换色
+     * ## 为什么是二档而不是三档
+     *
+     * 早先用了 `<0.60 暗 / >0.72 亮 / 中间保持` 的三档判定，
+     * 但中间地带恰恰是最需要决定的区间 —— 保持系统主题等于把问题留在原地。
+     *
+     * 现在以 0.5 为界二分：**明暗只由壁纸决定**，不掺系统主题。
+     * 想跟随系统就关掉这个开关（见 AppPrefs.isThemeFollowWallpaper）。
+     *
+     * @return true = 该用深色（壁纸偏暗），false = 该用浅色
      */
-    fun needsInversion(luma: Float, isDarkTheme: Boolean): Boolean {
-        if (luma < 0f) return false
-        // ⚠️ 阈值**故意不对称**（v0.22.1）。
-        //
-        // 实测一张「上浅下深」的壁纸平均亮度 0.52，被判为「不明显」而不反转 ——
-        // 但正文实际压在底部深色区，深色文字几乎看不见。
-        //
-        // 平均亮度会掩盖局部反差，所以这里偏向「判定为暗」：
-        //   · 平均 0.6 以下就认为该用浅色文字（深色主题）
-        //   · 只有明显偏亮（>0.72）才认为浅色主题安全
-        //
-        // 理由是不对称的风险：
-        //   深底 + 深字 = 完全看不见（不可用）
-        //   亮底 + 浅字 = 勉强可读（不便但不致命）
-        // 宁可多翻一次，也不要出现「看不见」。
-        val wallpaperDark = luma < 0.60f
-        val wallpaperLight = luma > 0.72f
-        return (wallpaperDark && !isDarkTheme) || (wallpaperLight && isDarkTheme)
-    }
+    fun preferDark(luma: Float): Boolean = luma < 0.5f
 }
