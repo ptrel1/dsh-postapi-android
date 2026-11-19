@@ -105,6 +105,17 @@ object AcrylicBackdrop {
         if (small !== slice) slice.recycle()
 
         val blurred = boxBlur(small, (blurRadius / 4).coerceAtLeast(1))
+        // 顺手算平均亮度：色罩该用黑还是白，取决于壁纸这块是亮还是暗。
+        // 在缩小后的图上算（通常 100×60），100 个采样点绰绰有余。
+        val pxs = IntArray(blurred.width * blurred.height)
+        blurred.getPixels(pxs, 0, blurred.width, 0, 0, blurred.width, blurred.height)
+        var lumaSum = 0f
+        for (p in pxs) {
+            lumaSum += 0.299f * ((p shr 16) and 0xFF) / 255f +
+                0.587f * ((p shr 8) and 0xFF) / 255f +
+                0.114f * (p and 0xFF) / 255f
+        }
+        lastLuma = if (pxs.isEmpty()) -1f else lumaSum / pxs.size
         val result = blurred.asImageBitmap()
         cached = result
         cacheKey = key
@@ -174,6 +185,11 @@ object AcrylicBackdrop {
         }
         return out
     }
+
+    /** 上次生成的图与它的平均亮度（0~1）。调用方据此决定色罩明暗。 */
+    @Volatile
+    var lastLuma: Float = -1f
+        private set
 
     /** 壁纸或布局变化时清缓存。 */
     @Synchronized

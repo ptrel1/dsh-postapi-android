@@ -198,8 +198,30 @@ fun InputBar(
     // v0.17.0：玻璃底色。OFF 档时保持原样（不透明），避免「关了玻璃还是一样」的困惑。
     val glassQuality = cd.ptrel.dshpostapi.ui.common.rememberGlassQuality()
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    // v0.21.3：有亚克力图时，色罩按**壁纸该区域的实际亮度**选明暗。
+    //
+    // 早先按主题选（浅色主题 → 白色 card），但主题说的是「App 是深色还是浅色」，
+    // 不是「壁纸这块是深还是浅」。实测浅色主题 + 浅色壁纸时，
+    // 白色色罩叠上去等于更白，占位文字几乎看不见。
+    //
+    // 用亚克力图的平均亮度判断：暗底配白罩（提亮+提高对比），亮底配黑罩（压暗）。
+    // 这样无论壁纸什么颜色，输入栏都有稳定的可读性。
+    // 亮度由 AcrylicBackdrop 在生成时算好（避免在这里再遍历一遍像素）。
+    val acrylicLuma = if (acrylic != null) {
+        cd.ptrel.dshpostapi.ui.common.AcrylicBackdrop.lastLuma
+    } else -1f
+
     val glassTint = if (glassQuality == cd.ptrel.dshpostapi.ui.common.GlassQuality.OFF) {
         colors.card
+    } else if (acrylicLuma >= 0f) {
+        // 有亚克力：按壁纸亮度决定色罩
+        if (acrylicLuma > 0.55f) {
+            // 亮底 → 黑罩，压暗提高文字对比
+            androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.38f)
+        } else {
+            // 暗底 → 白罩，提亮并让暗色文字可读
+            androidx.compose.ui.graphics.Color.White.copy(alpha = 0.22f)
+        }
     } else if (isDark) {
         // v0.17.3：0.86 → 0.62。
         //
