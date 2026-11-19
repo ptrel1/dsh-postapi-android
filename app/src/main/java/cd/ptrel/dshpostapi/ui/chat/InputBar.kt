@@ -53,6 +53,8 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
@@ -322,6 +324,33 @@ fun InputBar(
                     }
                 }
                 .border(1.dp, colors.outline, shape)
+                // v0.21.2：亚克力层改用**绘制阶段**画。
+                //
+                // 早先把它做成 Column 的子元素 + fillMaxHeight()，
+                // 而 Column 的后代用 fillMaxHeight 会「尽可能高」——
+                // 结果那张图铺满了整块消息区（用户截图里一大片模糊红）。
+                //
+                // drawWithContent 只影响绘制、不参与测量，
+                // 所以不会改变布局，也就不会撑开。
+                .then(
+                    if (acrylic != null) Modifier.drawWithContent {
+                        clipRect(0f, 0f, size.width, size.height) {
+                            drawImage(
+                                image = acrylic,
+                                alpha = 0.85f,
+                                dstSize = androidx.compose.ui.unit.IntSize(
+                                    size.width.toInt(),
+                                    size.height.toInt(),
+                                ),
+                                filterQuality = androidx.compose.ui.graphics.FilterQuality.Low,
+                            )
+                            // 色罩叠在亚克力图之上：Column 的 background() 在更底层，
+                            // 会被这张图盖住，所以这里补一次。
+                            drawRect(glassTint)
+                        }
+                        drawContent()
+                    } else Modifier
+                )
                 // v0.11.1：vertical 12dp → 8dp。
                 // 实测一行文字时卡片高 187px（≈71dp），比微信那类「一行胶囊」厚不少 ——
                 // 用户反馈「输入框太高」。水平 16dp 保持不动：它决定卡片到屏幕左右的距离，
@@ -336,31 +365,6 @@ fun InputBar(
             // 用 Box fillMaxSize 而不是 Modifier.background(ImageBitmap)：
             // background 不支持位图缩放策略，fillMaxSize 的 Image 才能让
             // 这张（可能是不同像素尺寸的）图正好铺满输入栏。
-            if (acrylic != null) {
-                androidx.compose.foundation.Image(
-                    bitmap = acrylic,
-                    contentDescription = null,
-                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .fillMaxHeight()
-                        .alpha(0.85f),
-                )
-                // ⚠️ 色罩必须叠在亚克力图**之上**。
-                //
-                // Column 的 background() 是最底层，Image 会盖住它 ——
-                // 不补这一层的话，`acrylic` 就是一张未加色调的模糊壁纸，
-                // 文字直接压上去，对比度全看壁纸本身。
-                //
-                // 用同一个 glassTint，保证「有壁纸」与「没壁纸」两档的色调一致。
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .fillMaxHeight()
-                        .background(glassTint),
-                )
-            }
-
             // ── 已选图片缩略图（v0.13.2）───────────────────
             //
             // 之前完全没有预览，用户选完图看不到任何变化，以为没选上。
