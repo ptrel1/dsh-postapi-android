@@ -1,5 +1,7 @@
 package cd.ptrel.dshpostapi.ui.markdown
 
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.window.Dialog
 import android.annotation.SuppressLint
 import android.graphics.Color as AndroidColor
 import android.os.Handler
@@ -85,6 +87,9 @@ fun MermaidDiagram(
     var ready by remember { mutableStateOf(false) }
     var lastPushed by remember { mutableStateOf<String?>(null) }
     var webView by remember { mutableStateOf<WebView?>(null) }
+    // v0.22.5：渲染好的 SVG，点击放大时交给全屏页
+    var svgMarkup by remember { mutableStateOf<String?>(null) }
+    var fullscreen by remember { mutableStateOf(false) }
     /** 页面已经回报过高度 = 图已经画出来了。它决定"加载中"那一层要不要撤掉。 */
     var drawn by remember { mutableStateOf(false) }
 
@@ -109,7 +114,20 @@ fun MermaidDiagram(
         return
     }
 
-    Box(modifier = modifier.fillMaxWidth()) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            // v0.22.5：点击放大。
+            //
+            // 图表卡片里的图按屏宽缩放，节点文字常常小到看不清。
+            // 点击进全屏，那里保持原始尺寸、可滚动缩放。
+            // 只有画好了才可点 —— 加载中点了会打开一个空页。
+            .then(
+                if (drawn && svgMarkup != null) {
+                    Modifier.clickable { fullscreen = true }
+                } else Modifier
+            ),
+    ) {
         /*
          * 延迟一拍再建 WebView。
          *
@@ -192,6 +210,7 @@ fun MermaidDiagram(
                                     ready = true
                                     push(this, force = true)
                                 },
+                                applySvg = { svgMarkup = it },
                             ),
                             BridgeName,
                         )
@@ -216,6 +235,12 @@ fun MermaidDiagram(
         if (!drawn) {
             MermaidLoading(modifier = Modifier.matchParentSize())
         }
+    }
+
+    // v0.22.5：全屏查看。用 Dialog 而不是新 Activity ——
+    // 放大图是「临时看一眼」，不该打断返回栈。
+    if (fullscreen) {
+        MermaidFullscreen(svg = svgMarkup, onDismiss = { fullscreen = false })
     }
 
     DisposableEffect(Unit) {
@@ -380,11 +405,90 @@ fun MermaidHeader(
  * ⚠️ 属性名与方法名**必须不同**：同名时方法体里的 `onHeight(...)` 解析到的是
  * 方法自己，编译器只会报一句"类型检查出现递归问题"，很难看出是自调用。
  */
+
+/**
+ * 全屏查看图表（v0.22.5）。
+ *
+ * ## 为什么要单独一个 WebView
+ *
+ * 卡片里的是「按屏宽缩放的缩略图」，这里要的是「原始尺寸、可缩放」。
+ * 两者视口策略相反，塞进同一个 WebView 会互相打架。
+ *
+ * ## 为什么复用 SVG 而不是重跑 mermaid
+ *
+ * 重跑要再解析一遍 3.4MB 的库、再算一次布局，用户点开要等。
+ * 复用已渲染好的 SVG 是瞬时的。
+ */
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+private fun MermaidFullscreen(
+    svg: String?,
+    onDismiss: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
+        ),
+    ) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(androidx.compose.ui.graphics.Color(0xFF121418)),
+        ) {
+            if (svg != null) {
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { context ->
+                        WebView(context).apply {
+                            // 与卡片里同样的软件图层理由：避免 GL functor 崩溃
+                            setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+                            setBackgroundColor(AndroidColor.TRANSPARENT)
+                            settings.javaScriptEnabled = true
+                            settings.useWideViewPort = true
+                            settings.loadWithOverviewMode = false
+                            // 全屏页要允许用户双指缩放
+                            settings.setSupportZoom(true)
+                            settings.builtInZoomControls = false
+                            settings.displayZoomControls = false
+                            overScrollMode = View.OVER_SCROLL_NEVER
+                            webViewClient = object : WebViewClient() {
+                                override fun onPageFinished(view: WebView, url: String?) {
+                                    super.onPageFinished(view, url)
+                                    // 用 JSON 转义，避免 SVG 里的引号打断脚本
+                                    val literal = org.json.JSONObject.quote(svg)
+                                    view.evaluateJavascript("setSvg(" + literal + ");", null)
+                                }
+                            }
+                            loadUrl("file:///android_asset/mermaid/fullscreen.html")
+                        }
+                    },
+                )
+            }
+
+            androidx.compose.material3.IconButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .align(androidx.compose.ui.Alignment.TopEnd)
+                    .padding(12.dp),
+            ) {
+                androidx.compose.material3.Text(
+                    text = "✕",
+                    color = androidx.compose.ui.graphics.Color.White,
+                    style = MaterialTheme.typography.titleLarge,
+                )
+            }
+        }
+    }
+}
 private class MermaidBridge(
     private val post: (() -> Unit) -> Unit,
     private val applyHeight: (Int) -> Unit,
     private val reportError: (String) -> Unit,
     private val reportReady: () -> Unit,
+    /** 渲染好的 SVG 原文（v0.22.5）。全屏查看页复用它，不重跑 mermaid。 */
+    private val applySvg: (String) -> Unit,
 ) {
     @JavascriptInterface
     fun onHeight(px: Int) = post { applyHeight(px) }
@@ -394,6 +498,9 @@ private class MermaidBridge(
 
     @JavascriptInterface
     fun onReady() = post { reportReady() }
+
+    @JavascriptInterface
+    fun onSvg(svg: String) = post { applySvg(svg) }
 
     @JavascriptInterface
     fun onLog(message: String) = Log.d(MermaidLogTag, message)

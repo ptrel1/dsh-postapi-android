@@ -512,8 +512,19 @@ private val CollapsedCodeHeight = 300.dp
  * 在某些版本会退化成不换行。取 100 行已经远超任何真实表格单元格。
  */
 private val wrappingTable: MarkdownComponent = { model ->
+    // v0.22.5：表格底色由**这里**画，不是靠库的 markdownColor.tableBackground。
+    //
+    // 原因：`MarkdownTable` 的签名是
+    //   (content, node, style, annotatorSettings, headerBlock, rowBlock)
+    // —— **没有背景色参数**。它读的是库内部默认值，而 markdownColor() 里的
+    // tableBackground 只在库自己的默认组件里生效。我们替换了组件，那项配置就不再生效。
+    //
+    // 实测表现：深色主题下表格仍是浅底深字（用户截图），
+    // 日志显示 TableDiag dark=true 但界面没变 —— 正是「配置没被读取」。
+    val mdColors = com.mikepenz.markdown.compose.LocalMarkdownColors.current
     Box(
         Modifier
+            .background(mdColors.tableBackground, RoundedCornerShape(10.dp))
             .preferHorizontalScroll()
             .horizontalScroll(rememberScrollState()),
     ) {

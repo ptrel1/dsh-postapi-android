@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5, user-scalable=yes">
+<style>
+  /*
+   * 全屏查看页（v0.22.5）。
+   *
+   * 与 view.html 的关键差别：
+   *   · 图**保持原始尺寸**，用户可以缩放/拖动看细节
+   *   · 深色底，避免白底在深色主题下刺眼
+   *   · 双击复位，方便快速回到全览
+   */
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #121418;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  #wrap {
+    min-height: 100vh;
+    display: inline-block;
+    padding: 16px;
+    box-sizing: border-box;
+  }
+  /*
+   * ⚠️ 这里**不能** width:100%。
+   *
+   * 全屏页的目的就是看细节，强制适配宽度等于把图又缩小一遍。
+   * 用 min-width:100% 让图至少铺满屏宽，超出部分横向滚动。
+   */
+  #wrap svg {
+    display: block;
+    min-width: calc(100vw - 32px);
+    height: auto;
+  }
+</style>
+</head>
+<body>
+<div id="wrap"></div>
+<script>
+/*
+ * 与 Kotlin 侧的契约：
+ *
+ *   setSvg(svgString)   —— Kotlin 把已渲染好的 SVG 交过来（不重新解析 mermaid，
+ *                          所以放大页秒开，不用再跑一遍 3.4MB 的库）
+ *
+ * 为什么复用 SVG 而不是重跑 mermaid：
+ *   重跑要下同样的代码、同样可能因为语法微差出不同的图，
+ *   而且每开一次全屏就多解析一次库 —— 用户点开图的动作应该是瞬时的。
+ */
+window.setSvg = function (svg) {
+  var wrap = document.getElementById('wrap');
+  wrap.innerHTML = svg;
+  var el = wrap.querySelector('svg');
+  if (!el) return;
+  /*
+   * mermaid 生成的 SVG 常带固定 width/height 属性（像素值）。
+   * 在手机上那个尺寸可能远小于屏幕，也可能远大于 —— 统一去掉，
+   * 交给 CSS 的 min-width 与 height:auto 决定。
+   */
+  el.removeAttribute('width');
+  el.removeAttribute('height');
+  el.style.width = '100%';
+  el.style.height = 'auto';
+  el.style.maxWidth = 'none';
+};
+
+// 双击复位滚动位置（看细节时容易滚丢，双击一下回到左上）
+document.addEventListener('dblclick', function () {
+  window.scrollTo(0, 0);
+});
+</script>
+</body>
+</html>

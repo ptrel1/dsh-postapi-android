@@ -14,15 +14,25 @@
     background: transparent;
     overflow: hidden;
   }
+  /*
+   * ⚠️ 宽度 100% + height auto —— 让容器尺寸**由 SVG 决定**。
+   *
+   * 早先用了 flex + align-items: flex-start：#out 的高度不随 SVG 撑开，
+   * Kotlin 侧 getBoundingClientRect 量到的是偏小的值，
+   * 于是图被 WebView 裁掉下半截（用户截图里只剩「手机 App → 选择使用方式」）。
+   *
+   * 现在 #out 是普通块级容器，SVG 的 width:100% / height:auto 会把它撑开。
+   */
   #out {
-    display: flex;
-    justify-content: center;
-    align-items: flex-start;
+    width: 100%;
+    margin: 0;
+    padding: 0;
   }
   #out svg {
-    max-width: 100%;
-    height: auto;
     display: block;
+    width: 100% !important;
+    height: auto !important;
+    max-width: 100%;
   }
 </style>
 <script src="mermaid.min.js"></script>
@@ -37,6 +47,7 @@
  *   Bridge.onReady()         —— 脚本就绪
  *   Bridge.onHeight(px)      —— 画完后回报真实高度（Kotlin 据此撑开容器）
  *   Bridge.onError(message)  —— 语法错 / 渲染失败
+ *   Bridge.onSvg(svg)        —— 把 SVG 字符串交给 Kotlin（全屏放大页要用）
  *
  * ⚠️ 高度必须回报：WebView 在 Compose 里默认高度是 0，
  * 不回报就只剩「加载中」那一层，用户看到一块空板。
@@ -74,6 +85,19 @@
     }
   }
 
+  function measure() {
+    var out = document.getElementById('out');
+    var svg = out.querySelector('svg');
+    if (!svg) return 0;
+    /*
+     * 量 **SVG 自身**的高度，不是父容器。
+     *
+     * SVG 有 viewBox 时 getBoundingClientRect 返回的是渲染后的实际尺寸，
+     * 这正是我们要撑开的像素数。
+     */
+    return Math.ceil(svg.getBoundingClientRect().height);
+  }
+
   window.render = function (code, dark, id) {
     if (!initMermaid(dark)) return;
     var seq = ++current;
@@ -87,10 +111,13 @@
         // 期间又发起了一次渲染：这次的结果作废（避免旧图覆盖新图）
         if (seq !== current) return;
         container.innerHTML = res.svg;
+        // 把 SVG 交给 Kotlin：全屏放大页用它（那边是另一个 WebView，
+        // 需要独立的 HTML 外壳，不能复用这里的）
+        try { Bridge.onSvg(res.svg); } catch (e) {}
         // 让浏览器先算完布局再量高度
         requestAnimationFrame(function () {
           requestAnimationFrame(function () {
-            var h = Math.ceil(out.getBoundingClientRect().height);
+            var h = measure();
             if (h > 0) {
               try { Bridge.onHeight(h); } catch (e) {}
             } else {
