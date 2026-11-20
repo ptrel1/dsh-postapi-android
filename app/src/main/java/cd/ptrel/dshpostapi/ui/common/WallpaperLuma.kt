@@ -32,6 +32,10 @@ object WallpaperLuma {
     private var cachedKey: String? = null
     private var cachedLuma: Float = -1f
 
+    /** 最暗 25% 区域的平均亮度。文字压在深色区时，这个值才是判据。 */
+    @Volatile
+    private var p25: Float = -1f
+
     /**
      * 壁纸平均亮度（0~1）；无法读取返回 -1。
      *
@@ -65,14 +69,29 @@ object WallpaperLuma {
                     val w = bmp.width; val h = bmp.height
                     val px = IntArray(w * h)
                     bmp.getPixels(px, 0, w, 0, 0, w, h)
+                    // 逐像素算亮度，排序后取分位数 ——
+                    // **平均亮度会掩盖局部反差**：上半部浅、下半部深的壁纸平均 0.52，
+                    // 但正文压在深色区时依然看不清（用户实测）。
+                    //
+                    // 取 P25（最暗的四分之一）更能代表「文字最可能压在什么亮度上」。
                     var sum = 0f
-                    for (p in px) {
-                        sum += 0.299f * ((p shr 16) and 0xFF) / 255f +
+                    val lumas = FloatArray(px.size)
+                    for (i in px.indices) {
+                        val p = px[i]
+                        val l = 0.299f * ((p shr 16) and 0xFF) / 255f +
                             0.587f * ((p shr 8) and 0xFF) / 255f +
                             0.114f * (p and 0xFF) / 255f
+                        lumas[i] = l
+                        sum += l
                     }
                     bmp.recycle()
-                    if (px.isEmpty()) -1f else sum / px.size
+                    if (px.isEmpty()) {
+                        -1f
+                    } else {
+                        lumas.sort()
+                        p25 = lumas[(lumas.size * 25 / 100).coerceIn(0, lumas.size - 1)]
+                        sum / px.size
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -99,5 +118,14 @@ object WallpaperLuma {
      *
      * @return true = 该用深色（壁纸偏暗），false = 该用浅色
      */
-    fun preferDark(luma: Float): Boolean = luma < 0.5f
+    fun preferDark(luma: Float): Boolean {
+        if (luma < 0f) return false
+        // 用 P25 而不是平均值：平均会被亮区拉高，掩盖「文字压在暗处」的问题。
+        //
+        // 阈值 0.62 是实测出来的：用户那张「上浅下深」的壁纸平均 0.52、P25 约 0.35，
+        // 判定为暗 → 用浅色文字，正文立刻可读。
+        // 只给平均值时，0.52 恰好落在断点附近，来回翻。
+        val ref = if (p25 >= 0f) p25 else luma
+        return ref < 0.62f
+    }
 }

@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<style>
+  /*
+   * 背景透明：图表卡片自己的底色由 Compose 那边画，
+   * 这里再铺一层白底会在深色主题下露出一块白框。
+   */
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    overflow: hidden;
+  }
+  #out {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+  }
+  #out svg {
+    max-width: 100%;
+    height: auto;
+    display: block;
+  }
+</style>
+<script src="mermaid.min.js"></script>
+</head>
+<body>
+<div id="out"></div>
+<script>
+/*
+ * 与 Kotlin 侧的契约（见 MermaidDiagram.kt）：
+ *
+ *   render(code, dark, id)   —— Kotlin 通过 evaluateJavascript 调用
+ *   Bridge.onReady()         —— 脚本就绪
+ *   Bridge.onHeight(px)      —— 画完后回报真实高度（Kotlin 据此撑开容器）
+ *   Bridge.onError(message)  —— 语法错 / 渲染失败
+ *
+ * ⚠️ 高度必须回报：WebView 在 Compose 里默认高度是 0，
+ * 不回报就只剩「加载中」那一层，用户看到一块空板。
+ */
+(function () {
+  var current = 0;
+
+  function fail(msg) {
+    try { Bridge.onError(String(msg)); } catch (e) {}
+  }
+
+  window.onerror = function (msg, src, line) {
+    fail('脚本错误: ' + msg + ' (' + src + ':' + line + ')');
+  };
+
+  function initMermaid(dark) {
+    if (typeof mermaid === 'undefined') {
+      fail('mermaid.min.js 未加载（assets/mermaid/mermaid.min.js 缺失？）');
+      return false;
+    }
+    try {
+      mermaid.initialize({
+        startOnLoad: false,
+        // 图形代码来自模型输出（不可信）：禁止其中的脚本与点击事件。
+        securityLevel: 'strict',
+        theme: dark ? 'dark' : 'default',
+        flowchart: { useMaxWidth: true, htmlLabels: true },
+        sequence: { useMaxWidth: true },
+        gantt: { useMaxWidth: true },
+      });
+      return true;
+    } catch (e) {
+      fail('mermaid 初始化失败: ' + e);
+      return false;
+    }
+  }
+
+  window.render = function (code, dark, id) {
+    if (!initMermaid(dark)) return;
+    var seq = ++current;
+    var out = document.getElementById('out');
+    out.innerHTML = '';
+    var container = document.createElement('div');
+    out.appendChild(container);
+
+    try {
+      mermaid.render('mmd-' + id + '-' + seq, code, container).then(function (res) {
+        // 期间又发起了一次渲染：这次的结果作废（避免旧图覆盖新图）
+        if (seq !== current) return;
+        container.innerHTML = res.svg;
+        // 让浏览器先算完布局再量高度
+        requestAnimationFrame(function () {
+          requestAnimationFrame(function () {
+            var h = Math.ceil(out.getBoundingClientRect().height);
+            if (h > 0) {
+              try { Bridge.onHeight(h); } catch (e) {}
+            } else {
+              fail('渲染结果高度为 0');
+            }
+          });
+        });
+      }).catch(function (e) {
+        if (seq !== current) return;
+        fail('渲染失败: ' + (e && e.message ? e.message : e));
+      });
+    } catch (e) {
+      fail('渲染异常: ' + (e && e.message ? e.message : e));
+    }
+  };
+
+  // 脚本已就绪：Kotlin 收到 onReady 后会把代码推过来
+  (function ready() {
+    if (typeof mermaid === 'undefined') {
+      fail('mermaid.min.js 未加载（assets/mermaid/mermaid.min.js 缺失？）');
+      return;
+    }
+    try { Bridge.onReady(); } catch (e) {}
+  })();
+})();
+</script>
+</body>
+</html>
